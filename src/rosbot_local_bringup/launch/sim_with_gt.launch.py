@@ -40,6 +40,14 @@ def generate_launch_description():
         parameters=[{'use_sim_time': True}],
     )
 
+    ready_notifier = Node(
+        package = 'rosbot_local_bringup',
+        executable = 'sim_ready_notifier',
+        name = 'sim_ready_notifier',
+        output = 'screen',
+        parameters = [{'use_sim_time': True}],
+    )
+
     return LaunchDescription([
         DeclareLaunchArgument(
             'gz_world',
@@ -59,4 +67,5 @@ def generate_launch_description():
         ),
         sim,
         gt_bridge,
+        ready_notifier
     ])
