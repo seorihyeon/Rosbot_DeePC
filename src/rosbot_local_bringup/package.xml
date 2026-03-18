@@ -13,9 +13,13 @@
   <test_depend>python3-pytest</test_depend>
 
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>rosgraph_msgs</exec_depend>
   <exec_depend>nav_msgs</exec_depend>
   <exec_depend>controller_manager_msgs</exec_depend>
+  <exec_depend>ros_gz_interfaces</exec_depend>
+  <exec_depend>ros_gz_bridge</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>

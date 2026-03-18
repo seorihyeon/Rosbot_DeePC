@@ -25,7 +25,7 @@ class CircleTest(Node):
         self.declare_parameter('wheelbase', 0.20) # m
         self.declare_parameter('cmd_hz', 20.0)
         self.declare_parameter('print_hz', 2.0)
-        self.declare_parameter('odom_topic', '/odometry/wheels')
+        self.declare_parameter('odom_topic', '/model/rosbot/odometry_gt')
         self.declare_parameter('unwrap_yaw', True) # yaw unwrap 사용 여부
 
         self.v = float(self.get_parameter('v').value)
