@@ -13,9 +13,18 @@ class SimReadyNotifier(Node):
     def __init__(self):
         super().__init__('sim_ready_notifier')
 
+        self.declare_parameter('spawner_node_name', '/spawner_differential_drive_controller')
+        self.declare_parameter('stable_ready_count', 3)
+
+        self.spawner_node_name = self.get_parameter('spawner_node_name').get_parameter_value().string_value
+        self.stable_ready_count = self.get_parameter('stable_ready_count').get_parameter_value().integer_value
         self.clock_ok = False
         self.odom_ok = False
         self.controller_ok = False
+        self.spawner_gone = False
+
+        self.ready_streak = 0
+        self.last_waiting_reason = None
         self.done = False
 
         self.last_clock_time = None
@@ -42,6 +51,22 @@ class SimReadyNotifier(Node):
 
     def odom_cb(self, msg: Odometry):
         self.odom_ok = True
+
+    def get_graph_node_full_names(self) -> set[str]:
+        names = set()
+        for name, namespace in self.get_node_names_and_namespaces():
+            if namespace == '/' or namespace == '':
+                names.add(f'/{name}')
+            else:
+                names.add(f'{namespace.rstrip("/")}/{name}')
+        return names
+
+    def is_spawner_gone(self) -> bool:
+        graph_nodes = self.get_graph_node_full_names()
+        if self.spawner_node_name in graph_nodes:
+            return False
+        return True
+
 
     def check_ready(self):
         if self.done:
@@ -70,15 +95,20 @@ class SimReadyNotifier(Node):
 
         self.controller_ok = 'differential_drive_controller' in active_names
 
-        if self.clock_ok and self.odom_ok and self.controller_ok:
+        self.spawner_gone = self.is_spawner_gone()
+
+        if self.clock_ok and self.odom_ok and self.controller_ok and self.spawner_gone:
+            self.ready_streak += 1
+        else:
+            self.ready_streak = 0
+
+        if self.ready_streak > self.stable_ready_count:
             self.get_logger().info('=' * 60)
             self.get_logger().info('Simulation READY')
-            self.get_logger().info(f'    /clock: {"OK" if self.clock_ok else "WAIT"}')
-            self.get_logger().info(f'    /model/rosbot/odometry_gt: {"OK" if self.odom_ok else "WAIT"}')
-            self.get_logger().info(
-                f'    differential_drive_controller: '
-                f'{"ACTIVE" if self.controller_ok else "WAIT"}'
-            )
+            self.get_logger().info('    /clock: OK')
+            self.get_logger().info('    /model/rosbot/odometry_gt: OK')
+            self.get_logger().info('    differential_drive_controller: ACTIVE')
+            self.get_logger().info('    spawner_gone: OK')
             self.get_logger().info('=' * 60)
 
             self.done = True

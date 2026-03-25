@@ -1,0 +1,45 @@
+/**:
+  ros__parameters:
+    use_sim_time: true
+
+    cmd_topic: /cmd_vel
+    odom_topic: /model/rosbot/odometry_gt
+    path_topic: /deepc/reference_path
+
+    sample_time: 0.05
+
+    straight_1_length: 1.5
+    straight_2_length: 1.0
+    straight_3_length: 1.5
+    straight_speed: 0.25
+
+    turn_radius: 0.8
+    turn_angle_deg: 90.0
+    turn_speed: 0.20
+
+    kx: 0.8
+    ky: 1.8
+    kpsi: 2.0
+
+    v_min: -0.2
+    v_max: 0.45
+    w_min: -1.2
+    w_max: 1.2
+
+    warmup_steps: 20
+
+    output_dir: /ws/datasets
+    file_prefix: collect
+
+    enable_perturbation: true
+    perturb_after_warmup_only: true
+
+    dv_perturb_min: -0.06
+    dv_perturb_max:  0.06
+    dw_perturb_min: -0.35
+    dw_perturb_max:  0.35
+
+    perturb_hold_steps_min: 4
+    perturb_hold_steps_max: 10
+
+    min_perturb_norm: 0.01
