@@ -15,7 +15,8 @@ setup(
         (os.path.join('share', package_name, 'launch'), glob('launch/*.py')),
         (os.path.join('share', package_name, 'config'), glob('config/*.yaml'))
     ],
-    install_requires=['setuptools'],
+    install_requires=['setuptools',
+                    'numpy'],
     zip_safe=True,
     maintainer='skim',
     maintainer_email='seu7704@dgist.ac.kr',
@@ -29,6 +30,7 @@ setup(
     entry_points={
         'console_scripts': [
              'collect_node = rosbot_deepc.collect_node:main',
+             'deepc_node = rosbot_deepc.deepc_node:main'
         ],
     },
 )

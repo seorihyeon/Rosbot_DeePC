@@ -1,0 +1,52 @@
+deepc_node:
+  ros__parameters:
+    use_sim_time: true
+
+    cmd_topic: /cmd_vel
+    odom_topic: /model/rosbot/odometry_gt
+    path_topic: /deepc/reference_path
+
+    sample_time: 0.05
+
+    straight_1_length: 1.5
+    straight_2_length: 1.0
+    straight_3_length: 1.5
+    straight_speed: 0.25
+
+    turn_radius: 0.8
+    turn_angle_deg: 90.0
+    turn_speed: 0.20
+
+    goal_pos_tol: 0.08
+    goal_yaw_tol: 0.15
+    final_hold_steps: 10
+    max_final_stop_steps: 200
+
+    kx: 0.8
+    ky: 1.8
+    kpsi: 2.0
+
+    v_min: -0.2
+    v_max: 0.45
+    w_min: -1.2
+    w_max: 1.2
+
+    dataset_csv: ""
+    dataset_dir: /ws/datasets
+    drop_initial_rows: 20
+
+    Tini: 12
+    horizon: 15
+    Q_diag: [30.0, 45.0, 12.0]
+    R_diag: [1.0, 0.2]
+    lambda_g: 1.0
+    lambda_y: 10000.0
+    solver_name: OSQP
+
+    ref_back_search: 3
+    ref_forward_search: 25
+
+    goal_pos_tol: 0.08
+    goal_yaw_tol: 0.15
+    final_hold_steps: 10
+    max_final_stop_steps: 200
