@@ -1,7 +1,9 @@
 #!usr/bin/env python3
-import csv, glob, math, os
+import csv
+import glob
+import math
+import os
 from collections import deque
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Deque, List, Optional, Tuple
 
@@ -16,17 +18,7 @@ from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped, TwistStamped
 from nav_msgs.msg import Odometry, Path
 
-from .utils import wrap_to_pi, quat_to_yaw, clamp
-
-@dataclass
-class RefPoint:
-    t: float
-    x: float
-    y: float
-    yaw: float
-    v: float
-    w: float
-    segment: str
+from .utils import RefPoint, wrap_to_pi, quat_to_yaw, clamp, load_reference_csv
 
 def block_hankel(data: np.ndarray, L: int) -> np.ndarray:
     """
@@ -163,15 +155,9 @@ class DeePCNode(Node):
         # timing
         self.declare_parameter("sample_time", 0.05)
 
-        # reference trajectory
-        self.declare_parameter("straight_1_length", 1.5)
-        self.declare_parameter("straight_2_length", 1.0)
-        self.declare_parameter("straight_3_length", 1.5)
-        self.declare_parameter("straight_speed", 0.25)
-
-        self.declare_parameter("turn_radius", 0.8)
-        self.declare_parameter("turn_angle_deg", 90.0)
-        self.declare_parameter("turn_speed", 0.20)
+        # external reference
+        self.declare_parameter('reference_csv', "")
+        self.declare_parameter('append_final_stop_steps', 20)
 
         # finish
         self.declare_parameter("goal_pos_tol", 0.08)
@@ -218,14 +204,8 @@ class DeePCNode(Node):
 
         self.dt = float(self.get_parameter("sample_time").value)
 
-        self.straight_1_length = float(self.get_parameter("straight_1_length").value)
-        self.straight_2_length = float(self.get_parameter("straight_2_length").value)
-        self.straight_3_length = float(self.get_parameter("straight_3_length").value)
-        self.straight_speed = float(self.get_parameter("straight_speed").value)
-
-        self.turn_radius = float(self.get_parameter("turn_radius").value)
-        self.turn_angle_deg = float(self.get_parameter("turn_angle_deg").value)
-        self.turn_speed = float(self.get_parameter("turn_speed").value)
+        self.reference_csv = str(self.get_parameter("reference_csv").value)
+        self.append_final_stop_steps = int(self.get_parameter("append_final_stop_steps").value)
 
         self.goal_pos_tol = float(self.get_parameter("goal_pos_tol").value)
         self.goal_yaw_tol = float(self.get_parameter("goal_yaw_tol").value)
@@ -273,7 +253,7 @@ class DeePCNode(Node):
         self.u_hist: Deque[np.ndarray] = deque(maxlen = self.Tini)
         self.y_hist: Deque[np.ndarray] = deque(maxlen = self.Tini)
 
-        self.ref_traj = self.build_reference_trajectory()
+        self.ref_traj = load_reference_csv(self.reference_csv, self.dt, self.append_final_stop_steps)
         self.path_msg = self.build_reference_path_msg()
 
         self.finished = False
@@ -297,6 +277,7 @@ class DeePCNode(Node):
         self.timer = self.create_timer(self.dt, self.on_timer)
 
         self.get_logger().info("DeePC tracking node started.")
+        self.get_logger().info(f"reference_csv : {self.reference_csv}")
         self.get_logger().info(f"dataset_csv : {csv_path}")
         self.get_logger().info(f"Tini = {self.Tini}, N = {self.N}")
         self.get_logger().info(f"cmd_topic    : {self.cmd_topic}")
@@ -314,47 +295,6 @@ class DeePCNode(Node):
         files.sort(key=os.path.getmtime)
         return files[-1]
     
-    def build_reference_trajectory(self) -> List[RefPoint]:
-        traj: List[RefPoint] = []
-
-        t = 0.0; x = 0.0; y = 0.0; yaw = 0.0
-        turn_angle = math.radians(self.turn_angle_deg)
-
-        def append_straight(length: float, v: float, name: str):
-            nonlocal x, y, yaw, t, traj
-            steps = max(1, int(round(length/max(abs(v), 1e-6)/self.dt)))
-            for _ in range(steps):
-                traj.append(RefPoint(t=t, x=x, y=y, yaw=yaw, v=v, w=0.0, segment=name))
-                x += v*math.cos(yaw)*self.dt
-                y += v*math.sin(yaw)*self.dt
-                t += self.dt
-
-        def append_turn(radius: float, angle: float, v: float, left: bool, name: str):
-            nonlocal x, y, yaw, t, traj
-            w = abs(v)/max(radius, 1e-6)
-            if not left:
-                w = -w
-
-            steps = max(1, int(round(abs(angle)/max(abs(w), 1e-6)/self.dt)))
-            for _ in range(steps):
-                traj.append(RefPoint(t=t, x=x, y=y, yaw=yaw, v=v, w=w, segment=name))
-                x += v*math.cos(yaw)*self.dt
-                y += v*math.sin(yaw)*self.dt
-                yaw += w*self.dt
-                t += self.dt
-
-        append_straight(self.straight_1_length, self.straight_speed, "straight_1")
-        append_turn(self.turn_radius, turn_angle, self.turn_speed, True, "left_turn")
-        append_straight(self.straight_2_length, self.straight_speed, "straight_2")
-        append_turn(self.turn_radius, turn_angle, self.turn_speed, False, "right_turn")
-        append_straight(self.straight_3_length, self.straight_speed, "straight_3")
-
-        for _ in range(20):
-            traj.append(RefPoint(t=t, x=x, y=y, yaw=yaw, v=0.0, w=0.0, segment="final_stop"))
-            t += self.dt
-
-        return traj
-
     def build_reference_path_msg(self) -> Path:
         msg = Path()
         msg.header.frame_id = "odom"
@@ -464,14 +404,10 @@ class DeePCNode(Node):
 
         self.run_rows.append({
             "step": self.step_idx, "mode": mode, "sim_time_sec": sim_time,
-            "ref_idx": self.ref_idx, "segment": ref.segment,
-
+            "ref_idx": self.ref_idx,
             "ref_x": ref.x, "ref_y": ref.y, "ref_yaw": ref.yaw, "ref_v": ref.v, "ref_w": ref.w,
-
             "x": x, "y": y, "yaw": yaw, "v_meas": v_meas, "w_meas": w_meas,
-
             "e_x": e_x, "e_y": e_y, "e_psi": e_psi,
-
             "cmd_v": cmd_v, "cmd_w": cmd_w,
         })
 
@@ -481,7 +417,7 @@ class DeePCNode(Node):
         csv_path = os.path.join(self.output_dir, f"{self.file_prefix}_{stamp}.csv")
 
         fieldnames = [
-            "step", "mode", "sim_time_sec", "ref_idx", "segment",
+            "step", "mode", "sim_time_sec", "ref_idx",
             "ref_x", "ref_y", "ref_yaw", "ref_v", "ref_w",
             "x", "y", "yaw", "v_meas", "w_meas",
             "e_x", "e_y", "e_psi",
@@ -508,11 +444,13 @@ class DeePCNode(Node):
         self.save_run_csv()
         rclpy.shutdown()
 
-    def check_finish_condition(self, ref: RefPoint, e_x: float, e_y: float, e_psi: float) -> None:
+    def check_finish_condition(self, e_x: float, e_y: float, e_psi: float) -> None:
         pos_err = math.sqrt(e_x * e_x + e_y * e_y)
         yaw_err = abs(e_psi)
 
-        if ref.segment == "final_stop":
+        is_last_ref = (self.ref_idx >= len(self.ref_traj) - 1)
+
+        if is_last_ref:
             self.final_stop_count += 1
 
             if pos_err <= self.goal_pos_tol and yaw_err <= self.goal_yaw_tol:
@@ -589,7 +527,7 @@ class DeePCNode(Node):
         self.u_hist.append(np.asarray([cmd_v, cmd_w], dtype=np.float64))
         self.y_hist.append(y_now)
 
-        self.check_finish_condition(ref, e_x, e_y, e_psi)
+        self.check_finish_condition(e_x, e_y, e_psi)
         if self.finished:
             return
 

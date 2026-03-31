@@ -8,14 +8,8 @@ deepc_node:
 
     sample_time: 0.05
 
-    straight_1_length: 1.5
-    straight_2_length: 1.0
-    straight_3_length: 1.5
-    straight_speed: 0.25
-
-    turn_radius: 0.8
-    turn_angle_deg: 90.0
-    turn_speed: 0.20
+    reference_csv: /ws/ref/test_reference.csv
+    append_final_stop_steps: 20
 
     goal_pos_tol: 0.08
     goal_yaw_tol: 0.15

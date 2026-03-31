@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-import csv, math, os, random
-from dataclasses import dataclass
+import csv
+import math
+import os
+import random
 from datetime import datetime
 from typing import List, Optional
 
@@ -9,18 +11,7 @@ from rclpy.node import Node
 from geometry_msgs.msg import TwistStamped, PoseStamped
 from nav_msgs.msg import Odometry, Path
 
-from .utils import wrap_to_pi, quat_to_yaw, clamp
-
-@dataclass
-class RefPoint:
-    t: float
-    x: float
-    y: float
-    yaw: float
-    v: float
-    w: float
-    segment: str
-
+from .utils import RefPoint, wrap_to_pi, quat_to_yaw, clamp, load_reference_csv
 
 class CollectNode(Node):
     def __init__(self) -> None:
@@ -35,15 +26,9 @@ class CollectNode(Node):
         ## Sample time
         self.declare_parameter('sample_time', 0.05)
 
-        ## Path definition
-        self.declare_parameter('straight_1_length', 1.5)
-        self.declare_parameter('straight_2_length', 1.0)
-        self.declare_parameter('straight_3_length', 1.5)
-        self.declare_parameter('straight_speed', 0.25)
-
-        self.declare_parameter('turn_radius', 0.8)
-        self.declare_parameter('turn_angle_deg', 90.0)
-        self.declare_parameter('turn_speed', 0.20)
+        ## External reference
+        self.declare_parameter('reference_csv', '')
+        self.declare_parameter('append_final_stop_steps', 20)
 
         ## Baseline tracker gain
         self.declare_parameter('kx', 0.8)
@@ -82,14 +67,8 @@ class CollectNode(Node):
 
         self.dt = float(self.get_parameter('sample_time').value)
 
-        self.straight_1_length = float(self.get_parameter('straight_1_length').value)
-        self.straight_2_length = float(self.get_parameter('straight_2_length').value)
-        self.straight_3_length = float(self.get_parameter('straight_3_length').value)
-        self.straight_speed = float(self.get_parameter('straight_speed').value)
-
-        self.turn_radius = float(self.get_parameter('turn_radius').value)
-        self.turn_angle_deg = float(self.get_parameter('turn_angle_deg').value)
-        self.turn_speed = float(self.get_parameter('turn_speed').value)
+        self.reference_csv = str(self.get_parameter('reference_csv').value)
+        self.append_final_stop_steps = int(self.get_parameter('append_final_stop_steps').value)
 
         self.kx = float(self.get_parameter('kx').value)
         self.ky = float(self.get_parameter('ky').value)
@@ -132,7 +111,7 @@ class CollectNode(Node):
         self.perturb_hold_count = 0
 
         # Build reference trajectory
-        self.ref_traj: List[RefPoint] = self.build_reference_trajectory()
+        self.ref_traj: List[RefPoint] = load_reference_csv(self.reference_csv, self.dt, self.append_final_stop_steps)
         self.publish_reference_path()
 
         # CSV
@@ -143,7 +122,7 @@ class CollectNode(Node):
         self.writer = csv.writer(self.csv_file)
 
         self.writer.writerow([
-            'step', 'segment', 'sim_time_sec',
+            'step', 'sim_time_sec',
             'ref_x', 'ref_y', 'ref_yaw', 'ref_v', 'ref_w',
             'x', 'y', 'yaw', 'v_meas', 'w_meas',
             'e_x', 'e_y', 'e_psi',
@@ -160,50 +139,6 @@ class CollectNode(Node):
         self.get_logger().info(f'sample_time : {self.dt:.3f} s')
         self.get_logger().info(f'ref_steps   : {len(self.ref_traj)}')
         self.get_logger().info(f'output_file : {self.csv_path}')
-
-    def build_reference_trajectory(self) -> List[RefPoint]:
-        traj: List[RefPoint] = []
-
-        t = 0.0
-        x = 0.0
-        y = 0.0
-        yaw = 0.0
-        turn_angle = math.radians(self.turn_angle_deg)
-
-        def append_straight(length: float, v: float, name: str):
-            nonlocal x, y, yaw, t, traj
-            steps = max(1, int(round(length / max(abs(v), 1e-6) / self.dt)))
-            for _ in range(steps):
-                traj.append(RefPoint(t=t, x=x, y=y, yaw=yaw, v=v, w=0.0, segment=name))
-                x += v * math.cos(yaw) * self.dt
-                y += v * math.sin(yaw) * self.dt
-                t += self.dt
-
-        def append_turn(radius: float, angle: float, v: float, left: bool, name: str):
-            nonlocal x, y, yaw, t, traj
-            w = abs(v) / max(radius, 1e-6)
-            if not left:
-                w = -w
-
-            steps = max(1, int(round(abs(angle) / max(abs(w), 1e-6) / self.dt)))
-            for _ in range(steps):
-                traj.append(RefPoint(t=t, x=x, y=y, yaw=yaw, v=v, w=w, segment=name))
-                x += v * math.cos(yaw) * self.dt
-                y += v * math.sin(yaw) * self.dt
-                yaw += w * self.dt
-                t += self.dt
-
-        append_straight(self.straight_1_length, self.straight_speed, 'straight_1')
-        append_turn(self.turn_radius, turn_angle, self.turn_speed, True, 'left_turn')
-        append_straight(self.straight_2_length, self.straight_speed, 'straight_2')
-        append_turn(self.turn_radius, turn_angle, self.turn_speed, False, 'right_turn')
-        append_straight(self.straight_3_length, self.straight_speed, 'straight_3')
-
-        for _ in range(20):
-            traj.append(RefPoint(t=t, x=x, y=y, yaw=yaw, v=0.0, w=0.0, segment='final_stop'))
-            t += self.dt
-
-        return traj
 
     def publish_reference_path(self) -> None:
         msg = Path()
@@ -293,7 +228,7 @@ class CollectNode(Node):
         sim_time = self.get_clock().now().nanoseconds * 1e-9
 
         self.writer.writerow([
-            self.step_idx, ref.segment, f'{sim_time:.6f}',
+            self.step_idx, f'{sim_time:.6f}',
             f'{ref.x:.6f}', f'{ref.y:.6f}', f'{ref.yaw:.6f}', f'{ref.v:.6f}', f'{ref.w:.6f}',
             f'{x:.6f}', f'{y:.6f}', f'{yaw:.6f}', f'{v_meas:.6f}', f'{w_meas:.6f}',
             f'{e_x:.6f}', f'{e_y:.6f}', f'{e_psi:.6f}',
@@ -359,7 +294,8 @@ class CollectNode(Node):
         if self.perturb_after_warmup_only and is_warmup:
             perturbation_allowed = False
         
-        if perturbation_allowed and ref.segment != 'final_stop':
+        is_last_ref = (ref_idx >= len(self.ref_traj) - 1)
+        if perturbation_allowed and (not is_last_ref):
             if self.perturb_hold_count <= 0:
                 self.change_perturbation()
             self.perturb_hold_count -= 1
@@ -376,7 +312,6 @@ class CollectNode(Node):
         if self.step_idx % 20 == 0:
             self.get_logger().info(
                 f"step={self.step_idx:4d}/{len(self.ref_traj)} "
-                f"seg={ref.segment:>10s} "
                 f"e=({e_x:+.3f}, {e_y:+.3f}, {e_psi:+.3f}) "
                 f"cmd=({cmd_v:+.3f}, {cmd_w:+.3f})"
             )
