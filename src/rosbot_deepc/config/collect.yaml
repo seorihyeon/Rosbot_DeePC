@@ -8,7 +8,10 @@ collect_node:
 
     sample_time: 0.05
 
-    reference_csv: /ws/ref/hourglass_reference.csv
+    reference_csv_list:
+      - /ws/ref/mosaic/straight_long.csv
+      - /ws/ref/mosaic/wave_lr.csv
+      - /ws/ref/mosaic/wave_rl.csv
     append_final_stop_steps: 20
 
     kx: 0.8
@@ -22,18 +25,22 @@ collect_node:
 
     warmup_steps: 20
 
-    output_dir: /ws/datasets
+    output_dir: /ws/datasets/mosaic
     file_prefix: collect
 
     enable_perturbation: true
     perturb_after_warmup_only: true
 
-    dv_perturb_min: -0.06
-    dv_perturb_max:  0.06
-    dw_perturb_min: -0.35
-    dw_perturb_max:  0.35
+    dv_perturb_min: -0.1
+    dv_perturb_max:  0.1
+    dw_perturb_min: -0.5
+    dw_perturb_max:  0.5
 
     perturb_hold_steps_min: 4
     perturb_hold_steps_max: 10
 
     min_perturb_norm: 0.01
+
+    reset_before_each_reference: true
+    reset_topic: /reset_rosbot
+    reset_settle_steps: 40

@@ -4,12 +4,14 @@ import math
 import os
 import random
 from datetime import datetime
+from pathlib import Path
 from typing import List, Optional
 
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import TwistStamped, PoseStamped
 from nav_msgs.msg import Odometry, Path
+from std_msgs.msg import Empty
 
 from .utils import RefPoint, wrap_to_pi, quat_to_yaw, clamp, load_reference_csv
 
@@ -27,8 +29,13 @@ class CollectNode(Node):
         self.declare_parameter('sample_time', 0.05)
 
         ## External reference
-        self.declare_parameter('reference_csv', '')
+        self.declare_parameter('reference_csv_list', [])
         self.declare_parameter('append_final_stop_steps', 20)
+
+        ## Optional reset between references
+        self.declare_parameter('reset_before_each_reference', False)
+        self.declare_parameter('reset_topic', '')
+        self.declare_parameter('reset_settle_steps', 40)
 
         ## Baseline tracker gain
         self.declare_parameter('kx', 0.8)
@@ -67,8 +74,12 @@ class CollectNode(Node):
 
         self.dt = float(self.get_parameter('sample_time').value)
 
-        self.reference_csv = str(self.get_parameter('reference_csv').value)
+        self.reference_csv_list = list(self.get_parameter('reference_csv_list').value)
         self.append_final_stop_steps = int(self.get_parameter('append_final_stop_steps').value)
+
+        self.reset_before_each_reference = bool(self.get_parameter('reset_before_each_reference').value)
+        self.reset_topic = str(self.get_parameter('reset_topic').value)
+        self.reset_settle_steps = int(self.get_parameter('reset_settle_steps').value)
 
         self.kx = float(self.get_parameter('kx').value)
         self.ky = float(self.get_parameter('ky').value)
@@ -111,18 +122,62 @@ class CollectNode(Node):
         self.perturb_hold_count = 0
 
         # Build reference trajectory
-        self.ref_traj: List[RefPoint] = load_reference_csv(self.reference_csv, self.dt, self.append_final_stop_steps)
-        self.publish_reference_path()
+        self.reference_paths = self.resolve_reference_paths()
+        self.reference_file_index = -1
+        self.current_reference_path = ""
+        self.current_reference_name = ""
+        self.ref_traj: List[RefPoint] = []
+
+        self.csv_path = ""; self.csv_file = None;
+        self.writer = None
+
+        self.reset_wait_count = 0
+
+        self.reset_pub = None
+        if self.reset_topic:
+            self.reset_pub = self.create_publisher(Empty, self.reset_topic, 1)
 
         # CSV
         os.makedirs(self.output_dir, exist_ok=True)
+        
+        self.start_next_reference()
+
+    def resolve_reference_paths(self) -> List[str]:
+        paths: List[str] = []
+
+        if self.reference_csv_list:
+            paths.extend([str(p) for p in self.reference_csv_list if str(p).strip()])
+        
+        unique_paths = []
+        seen = set()
+        for p in paths:
+            ap = os.path.abspath(p)
+            if ap not in seen:
+                seen.add(ap)
+                unique_paths.append(ap)
+        
+        if not unique_paths:
+            raise RuntimeError("No reference CSVs were provided")
+
+        for p in unique_paths:
+            if not os.path.isfile(p):
+                raise FileNotFoundError(f"Reference CSV not found: {p}")
+
+        return unique_paths
+
+    def open_output_csv(self) -> None:
         stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        self.csv_path = os.path.join(self.output_dir, f'{self.file_prefix}_{stamp}.csv')
+        safe_name = Path(self.current_reference_path).stem
+        self.csv_path = os.path.join(
+            self.output_dir,
+            f'{self.file_prefix}_{self.reference_file_index:02d}_{safe_name}_{stamp}.csv'
+        )
         self.csv_file = open(self.csv_path, 'w', newline='')
         self.writer = csv.writer(self.csv_file)
 
         self.writer.writerow([
             'step', 'sim_time_sec',
+            'reference_name', 'reference_path',
             'ref_x', 'ref_y', 'ref_yaw', 'ref_v', 'ref_w',
             'x', 'y', 'yaw', 'v_meas', 'w_meas',
             'e_x', 'e_y', 'e_psi',
@@ -130,15 +185,56 @@ class CollectNode(Node):
             'cmd_v_nom', 'cmd_w_nom', 'dv_pert', 'dw_pert'
         ])
         self.csv_file.flush()
+    
+    def close_output_csv(self) -> None:
+        if self.csv_file is None:
+            return
+        try:
+            self.csv_file.flush()
+            self.csv_file.close()
+        finally:
+            self.csv_fiel = None
+            self.writer = None
 
-        self.timer = self.create_timer(self.dt, self.on_timer)
+    def start_next_reference(self) -> None:
+        self.reference_file_index += 1
 
-        self.get_logger().info('Data collection node started.')
-        self.get_logger().info(f'odom_topic  : {self.odom_topic}')
-        self.get_logger().info(f'cmd_topic   : {self.cmd_topic}')
-        self.get_logger().info(f'sample_time : {self.dt:.3f} s')
-        self.get_logger().info(f'ref_steps   : {len(self.ref_traj)}')
-        self.get_logger().info(f'output_file : {self.csv_path}')
+        if self.reference_file_index >= len(self.reference_paths):
+            self.finish_all()
+            return
+        
+        self.current_reference_path = self.reference_paths[self.reference_file_index]
+        self.current_reference_name = Path(self.current_reference_path).stem
+
+        self.ref_traj = load_reference_csv(self.current_reference_path, self.dt, self.append_final_stop_steps)
+
+        self.publish_reference_path()
+
+        self.step_idx = 0
+        self.current_dv_pert = 0.0
+        self.current_dw_pert = 0.0
+        self.perturb_hold_count = 0
+
+        self.close_output_csv()
+        self.open_output_csv()
+
+        if self.reset_before_each_reference and self.reset_pub is not None:
+            self.get_logger().info(
+                f"Resetting robot before reference {self.reference_file_index + 1}/"
+                f"{len(self.reference_paths)}: {self.current_reference_name}"
+            )
+            self.reset_pub.publish(Empty())
+            self.reset_wait_count = self.reset_settle_steps
+        else:
+            self.reset_wait_count = 0
+
+        self.get_logger().info(
+            f"Started reference {self.reference_file_index + 1}/{len(self.reference_paths)}: "
+            f"{self.current_reference_name}"
+        )
+        self.get_logger().info(f"reference_csv : {self.current_reference_path}")
+        self.get_logger().info(f"ref_steps      : {len(self.ref_traj)}")
+        self.get_logger().info(f"output_file    : {self.csv_path}")
 
     def publish_reference_path(self) -> None:
         msg = Path()
@@ -229,6 +325,7 @@ class CollectNode(Node):
 
         self.writer.writerow([
             self.step_idx, f'{sim_time:.6f}',
+            self.current_reference_name, self.current_reference_path,
             f'{ref.x:.6f}', f'{ref.y:.6f}', f'{ref.yaw:.6f}', f'{ref.v:.6f}', f'{ref.w:.6f}',
             f'{x:.6f}', f'{y:.6f}', f'{yaw:.6f}', f'{v_meas:.6f}', f'{w_meas:.6f}',
             f'{e_x:.6f}', f'{e_y:.6f}', f'{e_psi:.6f}',
@@ -239,18 +336,29 @@ class CollectNode(Node):
         if self.step_idx % 50 == 0:
             self.csv_file.flush()
 
-    def finish(self) -> None:
+    def finish_current_reference(self) -> None:
+        self.get_logger().info(
+            f'Finished reference: {self.current_reference_name}. '
+            f'Saved dataset to: {self.csv_path}'
+        )
+
+        for _ in range(5):
+            self.publish_cmd(0.0, 0.0)
+
+        self.close_output_csv()
+        self.start_next_reference()
+
+    def finish_all(self) -> None:
         if self.finished:
             return
 
         self.finished = True
-        self.get_logger().info('Collection finished. Sending zero command...')
+        self.get_logger().info('All references finished. Sending zero command and shutting down...')
+
         for _ in range(5):
             self.publish_cmd(0.0, 0.0)
 
-        self.csv_file.flush()
-        self.csv_file.close()
-        self.get_logger().info(f'Saved dataset to: {self.csv_path}')
+        self.close_output_csv()
         rclpy.shutdown()
 
     def on_timer(self) -> None:
@@ -260,13 +368,18 @@ class CollectNode(Node):
         self.path_msg.header.stamp = self.get_clock().now().to_msg()
         self.path_pub.publish(self.path_msg)
 
+        if self.reset_wait_count > 0:
+            self.publish_cmd(0.0, 0.0)
+            self.reset_wait_count -= 1
+            return
+
         if self.last_odom is None:
             self.publish_cmd(0.0, 0.0)
             return
 
         ref_idx = max(0, self.step_idx - self.warmup_steps)
         if ref_idx >= len(self.ref_traj):
-            self.finish()
+            self.finish_current_reference()
             return
 
         ref = self.ref_traj[ref_idx]

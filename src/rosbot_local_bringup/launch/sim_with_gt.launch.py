@@ -70,6 +70,7 @@ def generate_launch_description():
         parameters=[{
             'use_sim_time': True,
             'trigger_topic': '/reset_rosbot',
+            'done_topic': '/reset_rosbot_done',
             'cmd_vel_topic': '/cmd_vel',
             'set_pose_service': [
                 TextSubstitution(text='/world/'),

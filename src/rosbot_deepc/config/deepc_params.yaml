@@ -25,14 +25,17 @@ deepc_node:
     w_min: -1.2
     w_max: 1.2
 
+    dataset_mode: mosaic
+    dataset_dir: /ws/datasets/mosaic
     dataset_csv: ""
-    dataset_dir: /ws/datasets
+    dataset_glob: "*.csv"
     drop_initial_rows: 20
+    min_rows_per_dataset: 80
 
-    Tini: 12
-    horizon: 15
-    Q_diag: [30.0, 45.0, 12.0]
-    R_diag: [1.0, 0.2]
+    Tini: 15
+    horizon: 10
+    Q_diag: [10.0, 10.0, 30.0] # Output cost coefficient, [e_x, e_y, e_psi]
+    R_diag: [1.0, 0.5] # Input cost coeficient, [v, w]
     lambda_g: 1.0
     lambda_y: 10000.0
     solver_name: OSQP

@@ -36,6 +36,30 @@ def block_hankel(data: np.ndarray, L: int) -> np.ndarray:
         H[:,i] = data[:, i:i+L].reshape(-1, order="F")
     return H
 
+def resolve_dataset_path(dataset_csv:str, dataset_dir: str, dataset_glob: str, dataset_mode: str) -> list[str]:
+    if dataset_mode == "single":
+        if dataset_csv:
+            if not os.path.isfile(dataset_csv):
+                raise FileNotFoundError(f"Dataset file no found: {dataset_csv}")
+            return [dataset_csv]
+        
+        pattern = os.path.join(dataset_dir, dataset_glob)
+        files = golb.glob(pattern)
+        if not files:
+            raise FileNotFoundError(f"No {dataset_glob} files found in dataset_dir: {dataset_dir}")
+        files.sort(key=os.path.getmtime)
+        return [files[-1]]
+    
+    if dataset_mode == "mosaic":
+        pattern = os.path.join(dataset_dir, dataset_glob)
+        files = glob.glob(pattern)
+        if not files:
+            raise FileNotFoundError(f"No files matched: {pattern}")
+        files.sort()
+        return files
+    
+    raise ValueError(f"Unknown dataset_mode: {dataset_mode}")
+
 def load_dataset_csv(csv_path: str, drop_initial_rows: int = 0) -> Tuple[np.ndarray, np.ndarray]:
     if not os.path.isfile(csv_path):
         raise FileNotFoundError(f"Dataset file not found: {csv_path}")
@@ -66,22 +90,79 @@ def load_dataset_csv(csv_path: str, drop_initial_rows: int = 0) -> Tuple[np.ndar
     y_data = np.asarray(y_list, dtype=np.float64).T
     return u_data, y_data
 
+def load_multiple_dataset_csvs(csv_paths: list[str], drop_initial_rows: int = 0, min_rows_per_dataset: int = 1):
+    datasets = []
+
+    for path in csv_paths:
+        u_data, y_data = load_dataset_csv(path, drop_initial_rows)
+
+        T = u_data.shape[1]
+        if T < min_rows_per_dataset:
+            continue
+        
+        datasets.append({"path": path, "u_data": u_data, "y_data": y_data})
+
+    if not datasets:
+        raise RuntimeError("No usable datasets found for mosaic Hankel.")
+    
+    return datasets
+
+def build_mosaic_hankel(datasets: list[dict], L: int) -> Tuple[np.ndarray, np.ndarray]:
+    Hu_list = []; Hy_list = []
+
+    for ds in datasets:
+        u_data = ds["u_data"]
+        y_data = ds["y_data"]
+
+        if u_data.shape[1] < L:
+            continue
+
+        Hu_i = block_hankel(u_data, L)
+        Hy_i = block_hankel(y_data, L)
+
+        Hu_list.append(Hu_i)
+        Hy_list.append(Hy_i)
+
+    if not Hu_list:
+        raise RuntimeError(f"No dataset has enough length for L={L}")
+
+    Hu = np.concatenate(Hu_list, axis=1)
+    Hy = np.concatenate(Hy_list, axis=1)
+    return Hu, Hy
+
 class DeePCSolver:
-    def __init__(self, u_data: np.ndarray, y_data: np.ndarray, Tini: int, N: int, 
-    Q_diag: List[float], R_diag: List[float], lambda_g: float, lambda_y: float, solver_name: str = "OSQP") -> None:
+    def __init__(self, u_data: Optional[np.ndarray], y_data: Optional[np.ndarray], Tini: int, N: int, 
+    Q_diag: List[float], R_diag: List[float], lambda_g: float, lambda_y: float,
+    solver_name: str = "OSQP", mosaic_datasets: Optional[list[dict]] = None) -> None:
         if cp is None:
             raise RuntimeError("cvxpy is not installed")
 
-        self.u_dim = u_data.shape[0]
-        self.y_dim = y_data.shape[0]
-        self.Tini = Tini; self.N = N; self.L = Tini + N; self.solver_name = solver_name
+        self.Tini = Tini; self.N = N; self.L = Tini + N
+        self.lambda_g = lambda_g; self.lambda_y = lambda_y
+        self.Q_diag = list(Q_diag); self.R_diag = list(R_diag)
 
-        Hu = block_hankel(u_data, self.L); Hy = block_hankel(y_data, self.L)
+        self.solver_name = solver_name
+
+        self._prepare_data(u_data, y_data, mosaic_datasets)
+        self._build_problem()
+
+        if mosaic_datasets is not None:
+            first_u = mosaic_datasets[0]["u_data"]
+            first_y = mosaic_datasets[0]["y_data"]
+            self.u_dim = first_u.shape[0]
+            self.y_dim = first_y.shape[0]
+
+            Hu, Hy = build_mosaic_hankel(mosaic_datasets, self.L)
+        else:
+            self.u_dim = u_data.shape[0]
+            self.y_dim = y_data.sahpe[0]
+            Hu = block_hankel(u_data, self.L)
+            Hy = block_hankel(y_data, self.L)
 
         self.Up = Hu[:self.u_dim*Tini, :]; self.Uf = Hu[self.u_dim*Tini:, :]
         self.Yp = Hy[:self.y_dim*Tini, :]; self.Yf = Hy[self.y_dim*Tini:, :]
 
-        self.n_col = self.Up.shape[1]
+        self.n_col = Hu.shape[1]
 
         Q = np.diag(np.asarray(Q_diag, dtype=np.float64)); R = np.diag(np.asarray(R_diag, dtype=np.float64))
         self.Q_blk = np.kron(np.eye(N), Q); self.R_blk = np.kron(np.eye(N), R)

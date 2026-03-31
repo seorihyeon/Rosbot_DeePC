@@ -19,6 +19,7 @@ class ResetRosbotServer(Node):
         super().__init__('reset_rosbot_server')
 
         self.declare_parameter('trigger_topic', '/reset_rosbot')
+        self.declare_parameter('done_topic', '/reset_rosbot_done')
         self.declare_parameter('cmd_vel_topic', '/cmd_vel')
         self.declare_parameter('set_pose_service', '/world/flat_empty/set_pose')
         self.declare_parameter('entity_name', 'rosbot')
@@ -34,6 +35,7 @@ class ResetRosbotServer(Node):
         self.declare_parameter('service_timeout_sec', 1.0)
 
         self.trigger_topic = self.get_parameter('trigger_topic').value
+        self.done_topic = self.get_parameter('done_topic').value
         self.cmd_vel_topic = self.get_parameter('cmd_vel_topic').value
         self.set_pose_service = self.get_parameter('set_pose_service').value
         self.entity_name = self.get_parameter('entity_name').value
@@ -55,8 +57,10 @@ class ResetRosbotServer(Node):
         )
 
         self.cmd_pub = self.create_publisher(TwistStamped, self.cmd_vel_topic, cmd_vel_qos)
+        self.done_pub = self.create_publisher(Empty, self.done_topic, 10)
         self.trigger_sub = self.create_subscription(Empty, self.trigger_topic, self.on_reset_trigger, 10)
         self.pose_client = self.create_client(SetEntityPose, self.set_pose_service)
+
         self.is_busy = False
         self.pose_future = None
 
@@ -83,6 +87,9 @@ class ResetRosbotServer(Node):
             self.cmd_pub.publish(self.make_zero_twist())
             if self.zero_publish_period > 0.0:
                 time.sleep(self.zero_publish_period)
+    
+    def publish_reset_done(self) -> None:
+        self.done_pub.publish(Empty())
 
     def make_pose_request(self) -> SetEntityPose.Request:
         req = SetEntityPose.Request()
@@ -115,16 +122,20 @@ class ResetRosbotServer(Node):
         self.pose_future.add_done_callback(self.on_set_pose_done)
     
     def on_set_pose_done(self, future) -> None:
+        success = False
         try:
             resp = future.result()
             if resp is None or not resp.success:
                 self.get_logger().error('set_pose returned success=false')
             else:
+                success = True
                 self.get_logger().info('pose reset succeeded')
         except Exception as exc:
             self.get_logger().error(f'set_pose call failed: {exc}')
         finally:
             self.publish_zero_burst(self.post_zero_publish_count)
+            if success:
+                self.publish_reset_done()
             self.is_busy = False
             self.pose_future = None
 
