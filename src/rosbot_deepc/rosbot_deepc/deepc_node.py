@@ -146,6 +146,10 @@ class DeePCSolver:
         self._prepare_data(u_data, y_data, mosaic_datasets)
         self._build_problem()
 
+
+    def _prepare_data(self, u_data: Optional[np.ndarray], y_data: Optional[np.ndarray],
+    mosaic_datasets: Optional[list[dict]]) -> None:
+
         if mosaic_datasets is not None:
             first_u = mosaic_datasets[0]["u_data"]
             first_y = mosaic_datasets[0]["y_data"]
@@ -154,35 +158,40 @@ class DeePCSolver:
 
             Hu, Hy = build_mosaic_hankel(mosaic_datasets, self.L)
         else:
+            if u_data is None or y_data is None:
+                raise ValueError("u_data and y_data must be provided in single-dataset mdoe.")
+            
             self.u_dim = u_data.shape[0]
-            self.y_dim = y_data.sahpe[0]
+            self.y_dim = y_data.shape[0]
+            
             Hu = block_hankel(u_data, self.L)
             Hy = block_hankel(y_data, self.L)
 
-        self.Up = Hu[:self.u_dim*Tini, :]; self.Uf = Hu[self.u_dim*Tini:, :]
-        self.Yp = Hy[:self.y_dim*Tini, :]; self.Yf = Hy[self.y_dim*Tini:, :]
+        self.Up = Hu[:self.u_dim*self.Tini, :]; self.Uf = Hu[self.u_dim*self.Tini:, :]
+        self.Yp = Hy[:self.y_dim*self.Tini, :]; self.Yf = Hy[self.y_dim*self.Tini:, :]
 
         self.n_col = Hu.shape[1]
 
-        Q = np.diag(np.asarray(Q_diag, dtype=np.float64)); R = np.diag(np.asarray(R_diag, dtype=np.float64))
-        self.Q_blk = np.kron(np.eye(N), Q); self.R_blk = np.kron(np.eye(N), R)
+        Q = np.diag(np.asarray(self.Q_diag, dtype=np.float64)); R = np.diag(np.asarray(self.R_diag, dtype=np.float64))
+        self.Q_blk = np.kron(np.eye(self.N), Q); self.R_blk = np.kron(np.eye(self.N), R)
 
-        self.u_ini_p = cp.Parameter(self.u_dim*Tini)
-        self.y_ini_p = cp.Parameter(self.y_dim*Tini)
-        self.u_ref_p = cp.Parameter(self.u_dim*N)
-        self.y_ref_p = cp.Parameter(self.y_dim*N)
+    def _build_problem(self) -> None:
+        self.u_ini_p = cp.Parameter(self.u_dim*self.Tini)
+        self.y_ini_p = cp.Parameter(self.y_dim*self.Tini)
+        self.u_ref_p = cp.Parameter(self.u_dim*self.N)
+        self.y_ref_p = cp.Parameter(self.y_dim*self.N)
         self.u_min_p = cp.Parameter(self.u_dim)
         self.u_max_p = cp.Parameter(self.u_dim)
 
         self.g = cp.Variable(self.n_col)
-        self.sigma_y = cp.Variable(self.y_dim*Tini)
-        self.u_f = cp.Variable(self.u_dim*N)
-        self.y_f = cp.Variable(self.y_dim*N)
+        self.sigma_y = cp.Variable(self.y_dim*self.Tini)
+        self.u_f = cp.Variable(self.u_dim*self.N)
+        self.y_f = cp.Variable(self.y_dim*self.N)
         
         cost = (
             cp.quad_form(self.y_f - self.y_ref_p, self.Q_blk) +
             cp.quad_form(self.u_f - self.u_ref_p, self.R_blk) +
-            lambda_g*cp.sum_squares(self.g) + lambda_y* cp.sum_squares(self.sigma_y)
+            self.lambda_g*cp.sum_squares(self.g) + self.lambda_y* cp.sum_squares(self.sigma_y)
         )
 
         constraints = [
@@ -192,7 +201,7 @@ class DeePCSolver:
             self.Yf @ self.g == self.y_f
         ]
 
-        for k in range(N):
+        for k in range(self.N):
             uk = self.u_f[k*self.u_dim:(k+1)*self.u_dim]
             constraints += [
                 uk >= self.u_min_p,
@@ -635,7 +644,6 @@ class DeePCNode(Node):
         except Exception:
             pass
 
-
 def main() -> None:
     rclpy.init()
     node = DeePCNode()
@@ -648,7 +656,6 @@ def main() -> None:
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
-
 
 if __name__ == "__main__":
     main()

@@ -4,11 +4,12 @@ import math
 import os
 import random
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path as FilePath
 from typing import List, Optional
 
 import rclpy
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from geometry_msgs.msg import TwistStamped, PoseStamped
 from nav_msgs.msg import Odometry, Path
 from std_msgs.msg import Empty
@@ -19,23 +20,30 @@ class CollectNode(Node):
     def __init__(self) -> None:
         super().__init__('collect_node')
 
-        # Parameter delcaration
+        self._declare_parameters()
+        self._load_parameters()
+        self._create_interfaces()
+        self._init_state()
+        self.start_next_reference()
+
+    def _declare_parameters(self) -> None:
         ## topic
         self.declare_parameter('cmd_topic', '/cmd_vel')
         self.declare_parameter('odom_topic', '/model/rosbot/odometry_gt')
         self.declare_parameter('path_topic', '/deepc/reference_path')
+        self.declare_parameter('reset_topic', '')
+        self.declare_parameter('reset_done_topic', '')
 
         ## Sample time
         self.declare_parameter('sample_time', 0.05)
 
         ## External reference
-        self.declare_parameter('reference_csv_list', [])
+        self.declare_parameter('reference_csv_list', Parameter.Type.STRING_ARRAY)
         self.declare_parameter('append_final_stop_steps', 20)
 
         ## Optional reset between references
         self.declare_parameter('reset_before_each_reference', False)
-        self.declare_parameter('reset_topic', '')
-        self.declare_parameter('reset_settle_steps', 40)
+        self.declare_parameter('reset_timeout_sec', 5.0)
 
         ## Baseline tracker gain
         self.declare_parameter('kx', 0.8)
@@ -63,14 +71,17 @@ class CollectNode(Node):
         self.declare_parameter('min_perturb_norm', 0.03)
 
         ## Output
-        self.declare_parameter('output_dir', '/ws/src/rosbot_deepc/datasets')
+        self.declare_parameter('output_dir', '/ws/datasets')
         self.declare_parameter('file_prefix', 'collect')
         self.declare_parameter('warmup_steps', 20)
 
+    def _load_parameters(self) -> None:
         # Define parameter variance
         self.cmd_topic = str(self.get_parameter('cmd_topic').value)
         self.odom_topic = str(self.get_parameter('odom_topic').value)
         self.path_topic = str(self.get_parameter('path_topic').value)
+        self.reset_topic = str(self.get_parameter('reset_topic').value)
+        self.reset_done_topic = str(self.get_parameter('reset_done_topic').value)
 
         self.dt = float(self.get_parameter('sample_time').value)
 
@@ -78,8 +89,7 @@ class CollectNode(Node):
         self.append_final_stop_steps = int(self.get_parameter('append_final_stop_steps').value)
 
         self.reset_before_each_reference = bool(self.get_parameter('reset_before_each_reference').value)
-        self.reset_topic = str(self.get_parameter('reset_topic').value)
-        self.reset_settle_steps = int(self.get_parameter('reset_settle_steps').value)
+        self.reset_timeout_sec = float(self.get_parameter('reset_timeout_sec').value)
 
         self.kx = float(self.get_parameter('kx').value)
         self.ky = float(self.get_parameter('ky').value)
@@ -107,11 +117,22 @@ class CollectNode(Node):
         self.file_prefix = str(self.get_parameter('file_prefix').value)
         self.warmup_steps = int(self.get_parameter('warmup_steps').value)
 
-        # ROS interfaces
+    def _create_interfaces(self) -> None:
         self.cmd_pub = self.create_publisher(TwistStamped, self.cmd_topic, 10)
         self.path_pub = self.create_publisher(Path, self.path_topic, 1)
         self.odom_sub = self.create_subscription(Odometry, self.odom_topic, self.on_odom, 50)
 
+        self.reset_pub = None
+        if self.reset_topic:
+            self.reset_pub = self.create_publisher(Empty, self.reset_topic, 1)
+
+        self.reset_done_sub = None
+        if self.reset_done_topic:
+            self.reset_done_sub = self.create_subscription(Empty, self.reset_done_topic, self.on_reset_done, 10)
+        
+        self.timer = self.create_timer(self.dt, self.on_timer)
+
+    def _init_state(self) -> None:
         # State
         self.last_odom: Optional[Odometry] = None
         self.step_idx = 0
@@ -128,19 +149,15 @@ class CollectNode(Node):
         self.current_reference_name = ""
         self.ref_traj: List[RefPoint] = []
 
-        self.csv_path = ""; self.csv_file = None;
-        self.writer = None
-
-        self.reset_wait_count = 0
-
-        self.reset_pub = None
-        if self.reset_topic:
-            self.reset_pub = self.create_publisher(Empty, self.reset_topic, 1)
-
-        # CSV
-        os.makedirs(self.output_dir, exist_ok=True)
+        # reset
+        self.waiting_for_reset = False
+        self.reset_request_time_sec = 0.0
+        self.reset_done_received = False
         
-        self.start_next_reference()
+        # CSV
+        self.csv_path = ""; self.csv_file = None
+        self.writer = None
+        os.makedirs(self.output_dir, exist_ok=True)
 
     def resolve_reference_paths(self) -> List[str]:
         paths: List[str] = []
@@ -167,7 +184,7 @@ class CollectNode(Node):
 
     def open_output_csv(self) -> None:
         stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        safe_name = Path(self.current_reference_path).stem
+        safe_name = FilePath(self.current_reference_path).stem
         self.csv_path = os.path.join(
             self.output_dir,
             f'{self.file_prefix}_{self.reference_file_index:02d}_{safe_name}_{stamp}.csv'
@@ -190,10 +207,11 @@ class CollectNode(Node):
         if self.csv_file is None:
             return
         try:
-            self.csv_file.flush()
-            self.csv_file.close()
+            if not self.csv_file.closed:
+                self.csv_file.flush()
+                self.csv_file.close()
         finally:
-            self.csv_fiel = None
+            self.csv_file = None
             self.writer = None
 
     def start_next_reference(self) -> None:
@@ -204,7 +222,7 @@ class CollectNode(Node):
             return
         
         self.current_reference_path = self.reference_paths[self.reference_file_index]
-        self.current_reference_name = Path(self.current_reference_path).stem
+        self.current_reference_name = FilePath(self.current_reference_path).stem
 
         self.ref_traj = load_reference_csv(self.current_reference_path, self.dt, self.append_final_stop_steps)
 
@@ -215,18 +233,21 @@ class CollectNode(Node):
         self.current_dw_pert = 0.0
         self.perturb_hold_count = 0
 
-        self.close_output_csv()
         self.open_output_csv()
+
+        self.waiting_for_reset = False
+        self.reset_done_received = False
 
         if self.reset_before_each_reference and self.reset_pub is not None:
             self.get_logger().info(
-                f"Resetting robot before reference {self.reference_file_index + 1}/"
+                f"Requesting pose reset before reference {self.reference_file_index + 1}/"
                 f"{len(self.reference_paths)}: {self.current_reference_name}"
             )
+            self.last_odom = None
+            self.publish_cmd(0.0, 0.0)
             self.reset_pub.publish(Empty())
-            self.reset_wait_count = self.reset_settle_steps
-        else:
-            self.reset_wait_count = 0
+            self.waiting_for_reset = True
+            self.reset_request_time_sec = self.get_clock().now().nanoseconds*1e-9
 
         self.get_logger().info(
             f"Started reference {self.reference_file_index + 1}/{len(self.reference_paths)}: "
@@ -336,6 +357,14 @@ class CollectNode(Node):
         if self.step_idx % 50 == 0:
             self.csv_file.flush()
 
+    def on_reset_done(self, msg: Empty) -> None:
+        if not self.waiting_for_reset:
+            return
+        
+        self.waiting_for_reset = False
+        self.reset_done_received = True
+        self.get_logger().info(f"/reset_done received.")
+
     def finish_current_reference(self) -> None:
         self.get_logger().info(
             f'Finished reference: {self.current_reference_name}. '
@@ -368,10 +397,17 @@ class CollectNode(Node):
         self.path_msg.header.stamp = self.get_clock().now().to_msg()
         self.path_pub.publish(self.path_msg)
 
-        if self.reset_wait_count > 0:
+        if self.waiting_for_reset:
             self.publish_cmd(0.0, 0.0)
-            self.reset_wait_count -= 1
-            return
+
+            now_sec = self.get_clock().now().nanoseconds*1e-9
+            if (now_sec - self.reset_request_time_sec) > self.reset_timeout_sec:
+                self.get_logger().warn(
+                    f"/reset_done timeout for {self.current_reference_name}."
+                    f"Retry reset"
+                )
+                self.reset_pub.publish(Empty())
+                self.reset_request_time_sec = now_sec
 
         if self.last_odom is None:
             self.publish_cmd(0.0, 0.0)

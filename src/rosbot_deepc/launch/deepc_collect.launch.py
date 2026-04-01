@@ -7,16 +7,6 @@ from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
-    sim = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            PathJoinSubstitution([
-                FindPackageShare('rosbot_local_bringup'),
-                'launch',
-                'sim_with_gt.launch.py'
-            ])
-        )
-    )
-
     collector = Node(
         package='rosbot_deepc',
         executable='collect_node',
@@ -33,6 +23,5 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        sim,
         collector,
     ])

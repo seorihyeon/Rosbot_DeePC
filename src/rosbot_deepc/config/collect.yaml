@@ -43,4 +43,5 @@ collect_node:
 
     reset_before_each_reference: true
     reset_topic: /reset_rosbot
-    reset_settle_steps: 40
+    reset_done_topic: /reset_rosbot_done
+    reset_timeout_sec: 10.0
