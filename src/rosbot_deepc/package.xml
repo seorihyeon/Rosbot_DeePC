@@ -8,11 +8,10 @@
   <license>MIT</license>
 
   <depend>rclpy</depend>
-  <depend>rcl_interfaces</depend>
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>ros_gz_interfaces</depend>
-  <depend>std_srvs</depend>
+  <depend>rosbot_interfaces</depend>
   <depend>launch</depend>
   <depend>launch_ros</depend>
   <depend>rosbot_local_bringup</depend>

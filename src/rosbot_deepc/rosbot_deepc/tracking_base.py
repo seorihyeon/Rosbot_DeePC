@@ -15,6 +15,7 @@ from ros_gz_interfaces.srv import ControlWorld
 from .runtime_base import RuntimeBase
 from .utils import (
     RefPoint,
+    align_reference_yaw_to_reset_branch,
     body_frame_pose_error,
     build_path_msg,
     load_reference_csv,
@@ -160,7 +161,7 @@ class TrackingBase(RuntimeBase):
             self.timer = self.create_timer(self.dt, self.on_timer)
 
     def begin_tracking(self) -> None:
-        self.start_with_optional_reset()
+        self.start_with_optional_reset(reset_pose=self.reference_start_reset_pose())
 
     def on_ready_after_reset(self) -> None:
         self.begin_runtime()
@@ -171,9 +172,17 @@ class TrackingBase(RuntimeBase):
             self.dt,
             self.append_final_stop_steps,
         )
-        if not self.uses_unwrapped_yaw:
+        if self.uses_unwrapped_yaw:
+            align_reference_yaw_to_reset_branch(self.ref_traj)
+        else:
             self._wrap_reference_yaw_in_place()
         self.path_msg = self.build_reference_path_msg()
+
+    def reference_start_reset_pose(self) -> Tuple[float, float, float]:
+        if not self.ref_traj:
+            raise RuntimeError("Cannot reset to an empty reference trajectory")
+        ref = self.ref_traj[0]
+        return ref.x, ref.y, wrap_to_pi(ref.yaw)
 
     def _wrap_reference_yaw_in_place(self) -> None:
         for ref in self.ref_traj:

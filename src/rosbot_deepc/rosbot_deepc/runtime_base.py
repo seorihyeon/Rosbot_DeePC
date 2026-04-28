@@ -6,7 +6,7 @@ import rclpy
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
-from std_srvs.srv import Trigger
+from rosbot_interfaces.srv import ResetPose
 
 from .utils import (
     normalize_yaw_representation,
@@ -35,6 +35,9 @@ class RuntimeBase(Node):
         self.declare_parameter("reset_before_start", False)
         self.declare_parameter("reset_service", '/reset_rosbot')
         self.declare_parameter("reset_timeout_sec", 10.0)
+        self.declare_parameter("reset_x", 0.0)
+        self.declare_parameter("reset_y", 0.0)
+        self.declare_parameter("reset_yaw", 0.0)
 
         self.declare_parameter("sample_time", 0.1)
 
@@ -60,6 +63,9 @@ class RuntimeBase(Node):
         self.reset_before_start = bool(self.get_parameter("reset_before_start").value)
         self.reset_service = str(self.get_parameter("reset_service").value)
         self.reset_timeout_sec = float(self.get_parameter("reset_timeout_sec").value)
+        self.reset_x = float(self.get_parameter("reset_x").value)
+        self.reset_y = float(self.get_parameter("reset_y").value)
+        self.reset_yaw = float(self.get_parameter("reset_yaw").value)
 
         self.dt = float(self.get_parameter("sample_time").value)
 
@@ -77,7 +83,7 @@ class RuntimeBase(Node):
 
         self.reset_cli = None
         if self.reset_service:
-            self.reset_cli = self.create_client(Trigger, self.reset_service)
+            self.reset_cli = self.create_client(ResetPose, self.reset_service)
 
     def _init_runtime_state(self) -> None:
         self.finished = False
@@ -310,7 +316,36 @@ class RuntimeBase(Node):
         self._clear_odom_state(reset_yaw=True)
         self.get_logger().info("reset service completed, waiting for fresh odom")
 
-    def request_reset(self) -> None:
+    def make_reset_request(
+        self,
+        reset_pose: Optional[Tuple[float, float, float]] = None,
+    ) -> ResetPose.Request:
+        if reset_pose is None:
+            x = self.reset_x
+            y = self.reset_y
+            yaw = self.reset_yaw
+        else:
+            x, y, yaw = reset_pose
+
+        values = {
+            "x": float(x),
+            "y": float(y),
+            "yaw": float(yaw),
+        }
+        invalid = [name for name, value in values.items() if not math.isfinite(value)]
+        if invalid:
+            raise ValueError("non-finite reset pose value(s): " + ", ".join(invalid))
+
+        req = ResetPose.Request()
+        req.x = values["x"]
+        req.y = values["y"]
+        req.yaw = values["yaw"]
+        return req
+
+    def request_reset(
+        self,
+        reset_pose: Optional[Tuple[float, float, float]] = None,
+    ) -> None:
         if self.waiting_for_reset:
             self.get_logger().warning(
                 "reset request ignored because another reset is already pending"
@@ -319,6 +354,12 @@ class RuntimeBase(Node):
 
         if self.reset_cli is None:
             self.on_ready_after_reset()
+            return
+
+        try:
+            request = self.make_reset_request(reset_pose)
+        except ValueError as exc:
+            self._shutdown_due_to_reset_failure(f"invalid reset pose: {exc}")
             return
 
         self.publish_cmd(0.0, 0.0)
@@ -330,19 +371,23 @@ class RuntimeBase(Node):
             return
 
         self.waiting_for_reset = True
-        self.reset_future = self.reset_cli.call_async(Trigger.Request())
+        self.reset_future = self.reset_cli.call_async(request)
         self.reset_future.add_done_callback(self.on_reset_response)
         self._arm_reset_timeout_timer()
-        self.get_logger().info("Reset request is sent.")
+        self.get_logger().info(
+            "Reset request is sent: "
+            f"x={request.x:+.3f}, y={request.y:+.3f}, yaw={request.yaw:+.3f}"
+        )
 
     def start_with_optional_reset(
         self,
         *,
+        reset_pose: Optional[Tuple[float, float, float]] = None,
         wait_for_first_odom_on_skip_reset: bool = False,
         skip_reset_log: Optional[str] = None,
     ) -> None:
         if self.reset_before_start and self.reset_cli is not None:
-            self.request_reset()
+            self.request_reset(reset_pose)
             return
 
         if self.reset_before_start and self.reset_cli is None:
@@ -365,7 +410,7 @@ class RuntimeBase(Node):
             return
 
         msg = Twist()
-        #msg.header.stamp = self.get_clock().now().to_msg()
+        # msg.header.stamp = self.get_clock().now().to_msg()
         msg.linear.x = float(v)
         msg.angular.z = float(w)
         self.cmd_pub.publish(msg)

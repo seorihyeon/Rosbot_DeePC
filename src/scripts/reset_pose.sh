@@ -6,10 +6,7 @@ usage() {
 Usage:
   reset_pose.sh
   reset_pose.sh /reset_rosbot
-  reset_pose.sh x y yaw [z] [reset_service]
-
-Environment:
-  RESET_NODE=/reset_rosbot_server
+  reset_pose.sh x y yaw [reset_service]
 EOF
 }
 
@@ -21,8 +18,9 @@ as_float() {
 }
 
 RESET_SERVICE="/reset_rosbot"
-RESET_NODE="${RESET_NODE:-/reset_rosbot_server}"
-SET_POSE=false
+RESET_X="0.0"
+RESET_Y="0.0"
+RESET_YAW="0.0"
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   usage
@@ -33,34 +31,22 @@ case "$#" in
   0)
     ;;
   1)
+    if [[ "$1" != /* ]]; then
+      usage >&2
+      exit 2
+    fi
     RESET_SERVICE="$1"
     ;;
   3)
-    SET_POSE=true
     RESET_X="$(as_float "$1")"
     RESET_Y="$(as_float "$2")"
     RESET_YAW="$(as_float "$3")"
-    RESET_Z="0.1"
     ;;
   4)
-    SET_POSE=true
     RESET_X="$(as_float "$1")"
     RESET_Y="$(as_float "$2")"
     RESET_YAW="$(as_float "$3")"
-    if [[ "$4" == /* ]]; then
-      RESET_Z="0.1"
-      RESET_SERVICE="$4"
-    else
-      RESET_Z="$(as_float "$4")"
-    fi
-    ;;
-  5)
-    SET_POSE=true
-    RESET_X="$(as_float "$1")"
-    RESET_Y="$(as_float "$2")"
-    RESET_YAW="$(as_float "$3")"
-    RESET_Z="$(as_float "$4")"
-    RESET_SERVICE="$5"
+    RESET_SERVICE="$4"
     ;;
   *)
     usage >&2
@@ -74,14 +60,8 @@ source /ws/install/setup.bash
 export ROS_LOG_DIR="${ROS_LOG_DIR:-/ws/log/ros}"
 mkdir -p "${ROS_LOG_DIR}"
 
-if [[ "${SET_POSE}" == true ]]; then
-  printf 'Setting reset pose on %s: x=%s, y=%s, z=%s, yaw=%s\n' \
-    "${RESET_NODE}" "${RESET_X}" "${RESET_Y}" "${RESET_Z}" "${RESET_YAW}"
-  ros2 param set "${RESET_NODE}" target_x "${RESET_X}"
-  ros2 param set "${RESET_NODE}" target_y "${RESET_Y}"
-  ros2 param set "${RESET_NODE}" target_z "${RESET_Z}"
-  ros2 param set "${RESET_NODE}" target_yaw "${RESET_YAW}"
-fi
+printf 'Calling reset service %s: x=%s, y=%s, yaw=%s\n' \
+  "${RESET_SERVICE}" "${RESET_X}" "${RESET_Y}" "${RESET_YAW}"
 
-echo "Calling reset service ${RESET_SERVICE} ..."
-ros2 service call "${RESET_SERVICE}" std_srvs/srv/Trigger "{}"
+ros2 service call "${RESET_SERVICE}" rosbot_interfaces/srv/ResetPose \
+  "{x: ${RESET_X}, y: ${RESET_Y}, yaw: ${RESET_YAW}}"

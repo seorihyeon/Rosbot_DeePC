@@ -12,7 +12,6 @@ random_collect_node:
     random_min_command_norm: 0.03
 
     randomize_initial_pose: true
-    reset_parameter_node: /reset_rosbot_server
     random_initial_pose_center_x: 0.0
     random_initial_pose_center_y: 0.0
     random_initial_pose_radius: 1.0

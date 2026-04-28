@@ -10,6 +10,7 @@ from nav_msgs.msg import Path
 from .collect_base import CollectBase
 from .utils import (
     RefPoint,
+    align_reference_yaw_to_reset_branch,
     body_frame_pose_error,
     build_path_msg,
     clamp,
@@ -124,7 +125,9 @@ class ReferenceCollectNode(CollectBase):
         self.ref_traj = load_reference_csv(
             self.current_reference_path, self.dt, self.append_final_stop_steps
         )
-        if not self.uses_unwrapped_yaw:
+        if self.uses_unwrapped_yaw:
+            align_reference_yaw_to_reset_branch(self.ref_traj)
+        else:
             self.wrap_reference_yaw_in_place()
         self.publish_reference_path()
 
@@ -134,7 +137,7 @@ class ReferenceCollectNode(CollectBase):
         self.current_perturb_w = 0.0
         self.perturb_hold_count = 0
 
-        self.start_with_optional_reset()
+        self.start_with_optional_reset(reset_pose=self.current_reference_reset_pose())
         self.get_logger().info(f"Started reference '{self.current_reference_name}' with {len(self.ref_traj)} steps")
 
     def on_ready_after_reset(self):
@@ -150,6 +153,12 @@ class ReferenceCollectNode(CollectBase):
 
     def publish_reference_path(self):
         self.path_msg = build_path_msg(self.ref_traj, frame_id='odom')
+
+    def current_reference_reset_pose(self):
+        if not self.ref_traj:
+            raise RuntimeError("Cannot reset to an empty reference trajectory")
+        ref = self.ref_traj[0]
+        return ref.x, ref.y, wrap_to_pi(ref.yaw)
 
     def wrap_reference_yaw_in_place(self):
         for ref in self.ref_traj:
@@ -234,7 +243,7 @@ class ReferenceCollectNode(CollectBase):
 
         self.publish_cmd(cmd_v, cmd_w)
 
-        sim_time = self.get_clock().now().nanoseconds*1e-9
+        sim_time = self.get_clock().now().nanoseconds * 1e-9
         self.write_csv_row([
             self.step_idx, f'{sim_time:.6f}',
             f'{ref.x:.6f}', f'{ref.y:.6f}', f'{ref.yaw:.6f}', f'{ref.v:.6f}', f'{ref.w:.6f}',

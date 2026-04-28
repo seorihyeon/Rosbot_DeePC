@@ -13,10 +13,7 @@ def generate_launch_description():
     robot_model = LaunchConfiguration('robot_model')
     rviz = LaunchConfiguration('rviz')
     gz_headless_mode = LaunchConfiguration('gz_headless_mode')
-    reset_x = LaunchConfiguration('reset_x')
-    reset_y = LaunchConfiguration('reset_y')
     reset_z = LaunchConfiguration('reset_z')
-    reset_yaw = LaunchConfiguration('reset_yaw')
 
     sim = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -96,10 +93,7 @@ def generate_launch_description():
             ],
             'entity_name': 'rosbot',
             'frame_id': 'base_link',
-            'target_x': ParameterValue(reset_x, value_type=float),
-            'target_y': ParameterValue(reset_y, value_type=float),
             'target_z': ParameterValue(reset_z, value_type=float),
-            'target_yaw': ParameterValue(reset_yaw, value_type=float),
             'pre_zero_publish_count': 3,
             'post_zero_publish_count': 5,
             'zero_publish_period': 0.03,
@@ -129,20 +123,8 @@ def generate_launch_description():
             default_value='True'
         ),
         DeclareLaunchArgument(
-            'reset_x',
-            default_value='0.0'
-        ),
-        DeclareLaunchArgument(
-            'reset_y',
-            default_value='0.0'
-        ),
-        DeclareLaunchArgument(
             'reset_z',
             default_value='0.1'
-        ),
-        DeclareLaunchArgument(
-            'reset_yaw',
-            default_value='0.0'
         ),
         sim,
         gt_bridge,

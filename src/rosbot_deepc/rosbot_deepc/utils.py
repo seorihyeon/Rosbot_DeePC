@@ -66,6 +66,21 @@ def unwrap_angle_sequence(angles: List[float]) -> List[float]:
     return out
 
 
+def align_reference_yaw_to_reset_branch(points: List[RefPoint]) -> float:
+    if not points:
+        return 0.0
+
+    reset_yaw = wrap_to_pi(points[0].yaw)
+    yaw_offset = reset_yaw - float(points[0].yaw)
+    if abs(yaw_offset) <= 1.0e-12:
+        return 0.0
+
+    for point in points:
+        point.yaw += yaw_offset
+
+    return yaw_offset
+
+
 def quat_to_yaw(x: float, y: float, z: float, w: float) -> float:
     siny_cosp = 2.0 * (w * z + x * y)
     cosy_cosp = 1.0 - 2.0 * (y * y + z * z)

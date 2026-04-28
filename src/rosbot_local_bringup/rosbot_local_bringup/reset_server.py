@@ -13,7 +13,7 @@ from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from geometry_msgs.msg import Twist, Pose
 from ros_gz_interfaces.msg import Entity
 from ros_gz_interfaces.srv import SetEntityPose
-from std_srvs.srv import Trigger
+from rosbot_interfaces.srv import ResetPose
 
 
 class ResetRosbotServer(Node):
@@ -26,10 +26,7 @@ class ResetRosbotServer(Node):
         self.declare_parameter('entity_name', 'rosbot')
         self.declare_parameter('entity_type', int(Entity.MODEL))
         self.declare_parameter('frame_id', 'base_link')
-        self.declare_parameter('target_x', 0.0)
-        self.declare_parameter('target_y', 0.0)
         self.declare_parameter('target_z', 0.1)
-        self.declare_parameter('target_yaw', 0.0)
         self.declare_parameter('pre_zero_publish_count', 3)
         self.declare_parameter('post_zero_publish_count', 5)
         self.declare_parameter('zero_publish_period', 0.03)
@@ -57,7 +54,7 @@ class ResetRosbotServer(Node):
 
         self.cmd_pub = self.create_publisher(Twist, self.cmd_vel_topic, cmd_vel_qos)
         self.reset_srv = self.create_service(
-            Trigger,
+            ResetPose,
             self.reset_service,
             self.on_reset_request,
             callback_group=self.reset_srv_group,
@@ -91,17 +88,20 @@ class ResetRosbotServer(Node):
             if self.zero_publish_period > 0.0:
                 time.sleep(self.zero_publish_period)
 
-    def read_target_pose(self) -> tuple[float, float, float, float]:
-        x = float(self.get_parameter('target_x').value)
-        y = float(self.get_parameter('target_y').value)
+    def read_target_pose(
+        self,
+        request: ResetPose.Request,
+    ) -> tuple[float, float, float, float]:
+        x = float(request.x)
+        y = float(request.y)
         z = float(self.get_parameter('target_z').value)
-        yaw = float(self.get_parameter('target_yaw').value)
+        yaw = float(request.yaw)
 
         values = {
-            'target_x': x,
-            'target_y': y,
+            'x': x,
+            'y': y,
             'target_z': z,
-            'target_yaw': yaw,
+            'yaw': yaw,
         }
         invalid = [name for name, value in values.items() if not math.isfinite(value)]
         if invalid:
@@ -145,7 +145,7 @@ class ResetRosbotServer(Node):
 
         return future.result()
 
-    def perform_reset(self) -> tuple[bool, str]:
+    def perform_reset(self, request: ResetPose.Request) -> tuple[bool, str]:
         if self.is_busy:
             msg = 'reset already in progress'
             self.get_logger().warning(msg)
@@ -154,7 +154,7 @@ class ResetRosbotServer(Node):
         self.is_busy = True
 
         try:
-            target_x, target_y, target_z, target_yaw = self.read_target_pose()
+            target_x, target_y, target_z, target_yaw = self.read_target_pose(request)
         except ValueError as exc:
             msg = f'invalid reset pose: {exc}'
             self.get_logger().error(msg)
@@ -201,8 +201,12 @@ class ResetRosbotServer(Node):
         self.get_logger().info(msg)
         return True, msg
 
-    def on_reset_request(self, _: Trigger.Request, response: Trigger.Response) -> Trigger.Response:
-        success, message = self.perform_reset()
+    def on_reset_request(
+        self,
+        request: ResetPose.Request,
+        response: ResetPose.Response,
+    ) -> ResetPose.Response:
+        success, message = self.perform_reset(request)
         response.success = bool(success)
         response.message = str(message)
         return response
