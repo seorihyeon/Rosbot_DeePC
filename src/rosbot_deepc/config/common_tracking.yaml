@@ -1,0 +1,32 @@
+/**:
+  ros__parameters:
+    stepped_mode: true
+    world_control_service: /world/flat_empty/control
+    physics_dt: 0.001
+    step_service_timeout_sec: 2.0
+    new_odom_timeout_sec: 2.0
+
+    path_topic: /deepc/reference_path
+    actual_path_topic: /deepc/actual_path
+
+    reference_csv: /ws/ref/circle_reference.csv
+    append_final_stop_steps: 20
+
+    goal_pos_tol: 0.08
+    goal_yaw_tol: 0.15
+    final_hold_steps: 10
+    max_final_stop_steps: 200
+
+    ref_back_search: 3
+    ref_forward_search: 25
+    ref_progress_eps: 0.02
+
+    abort_if_far_from_reference: true
+    abort_far_steps: 5
+    abort_ignore_first_steps: 20
+    abort_max_pos_err: 2.0
+
+    tracking_preview_steps: 1
+
+    output_dir: /ws/results
+    file_prefix: deepc

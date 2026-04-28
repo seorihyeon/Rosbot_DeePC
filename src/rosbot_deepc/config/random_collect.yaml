@@ -1,0 +1,12 @@
+random_collect_node:
+  ros__parameters:
+    random_dataset_steps: 300
+    progress_log_interval_steps: 100
+    random_seed: -1
+    random_cmd_dv_min: -0.2
+    random_cmd_dv_max: 0.2
+    random_cmd_dw_min: -0.4
+    random_cmd_dw_max: 0.4
+    random_hold_steps_min: 4
+    random_hold_steps_max: 8
+    random_min_command_norm: 0.03

@@ -1,0 +1,40 @@
+deepc_node:
+  ros__parameters:
+    # DeePC horizons
+    Tini: 8
+    horizon: 12
+
+    # wrap/unwrap: y = [x, y, yaw, v_meas, w_meas]
+    # trig       : y = [x, y, cos(yaw), sin(yaw), v_meas, w_meas]
+    # Q_diag length must match y dimension: 5 for wrap/unwrap, 6 for trig.
+    Q_diag: [400.0, 400.0, 100.0, 50.0, 20.0]
+    R_diag: [0.01, 1.0]
+
+    lambda_g: 5.0e4
+    lambda_s: 1.0e9
+
+    dataset_mode: single
+    dataset_csv: /ws/datasets/random.csv
+    # dataset_mode: mosaic
+    # dataset_dir: /ws/datasets/mosaic
+    dataset_glob: "*.csv"
+    min_rows_per_dataset: 80
+
+    # Pair each logged command u_k with the next measured output y_{k+1}.
+    dataset_y_shift_steps: 1
+    drop_initial_rows: 20
+    max_rows_per_dataset: 0
+
+    # Persistency of excitation check
+    pe_order_extra: 10
+    check_pe_before_start: true
+    pe_rank_tol: 1.0e-9
+    abort_on_pe_failure: true 
+
+    solver_name: OSQP
+
+    enable_warmup: false
+    kx: 0.8
+    ky: 1.8
+    kpsi: 2.0
+    

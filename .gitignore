@@ -1,0 +1,14 @@
+build/
+install/
+log/
+__pycache__/
+*.py[cod]
+src/husarion_components_description/
+src/husarion_controllers/
+src/husarion_gz_worlds/
+src/rosbot_ros/
+src/micro-ROS-Agent/
+.deepc
+datasets/
+ref/
+results/

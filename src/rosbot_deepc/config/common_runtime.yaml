@@ -1,0 +1,24 @@
+/**:
+  ros__parameters:
+    use_sim_time: true
+
+    cmd_topic: /cmd_vel
+    #odom_topic: /model/rosbot/odometry_gt
+    odom_topic: /odometry/wheels
+
+    # yaw_representation: wrap | unwrap | trig
+    yaw_representation: wrap
+
+    reset_before_start: true
+    reset_service: /reset_rosbot
+    reset_timeout_sec: 10.0
+
+    sample_time: 0.1
+
+    v_min: 0.0
+    v_max: 0.7
+    w_min: -2.0
+    w_max: 2.0
+
+    sanitize_odom_twist: true
+    max_abs_measured_w: 10.0

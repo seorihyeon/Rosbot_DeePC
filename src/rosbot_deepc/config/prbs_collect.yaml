@@ -1,0 +1,53 @@
+prbs_collect_node:
+  ros__parameters:
+    v_min: -0.7
+
+    # Total collection length
+    dataset_steps: 1500
+    progress_log_interval_steps: 100
+
+    # Operating point
+    # false: use the first fresh odom after reset as the target pose.
+    # true : use the explicit target_x/target_y/target_yaw below.
+    use_explicit_target_pose: false
+    target_x: 0.0
+    target_y: 0.0
+    target_yaw: 0.0
+
+    # Stabilizing controller gains
+    kx: 0.8
+    ky: 1.8
+    kpsi: 2.0
+
+    # PRBS excitation amplitudes
+    prbs_v_amplitude: 0.08
+    prbs_w_amplitude: 0.35
+
+    # PRBS switching periods in control steps
+    prbs_v_switch_steps: 4
+    prbs_w_switch_steps: 7
+
+    # Independent non-zero seeds for the two PRBS channels
+    prbs_seed_v: 44257   # 0xACE1
+    prbs_seed_w: 48879   # 0xBEEF
+
+    # Safety / recovery guard
+    guard_pos_err: 1.0
+    guard_yaw_err: 2.0
+    guard_recovery_steps: 10
+    disable_prbs_during_recovery: true
+
+    # Randomize operating point
+    randomize_operating_point: true
+    switch_interval_steps: 200
+
+    op_sample_mode: global
+    op_dx: 0.7
+    op_dy: 0.7
+    op_dyaw: 1.57
+    op_x_min: -1.0
+    op_x_max: 1.0
+    op_y_min: -1.0
+    op_y_max: 1.0
+    op_yaw_min: -3.14
+    op_yaw_max: 3.14

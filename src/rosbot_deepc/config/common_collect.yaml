@@ -1,0 +1,5 @@
+/**:
+  ros__parameters:
+    output_dir: /ws/datasets
+    file_prefix: collect
+    warmup_steps: 20

@@ -1,0 +1,20 @@
+reference_collect_node:
+  ros__parameters:
+    path_topic: /deepc/reference_path
+    append_final_stop_steps: 20
+    reference_csv_list: ["/ws/ref/eight_reference.csv"]
+
+    kx: 1.2
+    ky: 1.8
+    kpsi: 2.0
+
+    perturb_enable: true
+    perturb_seed: -1
+    perturb_v_min: -0.03
+    perturb_v_max: 0.03
+    perturb_w_min: -0.15
+    perturb_w_max: 0.15
+    perturb_hold_steps_min: 2
+    perturb_hold_steps_max: 5
+
+    
