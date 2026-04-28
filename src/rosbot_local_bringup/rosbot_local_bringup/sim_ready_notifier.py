@@ -2,7 +2,6 @@
 
 import rclpy
 from rclpy.node import Node
-from rclpy.duration import Duration
 
 from rosgraph_msgs.msg import Clock
 from nav_msgs.msg import Odometry
@@ -16,8 +15,12 @@ class SimReadyNotifier(Node):
         self.declare_parameter('spawner_node_name', '/spawner_differential_drive_controller')
         self.declare_parameter('stable_ready_count', 3)
 
-        self.spawner_node_name = self.get_parameter('spawner_node_name').get_parameter_value().string_value
-        self.stable_ready_count = self.get_parameter('stable_ready_count').get_parameter_value().integer_value
+        self.spawner_node_name = (
+            self.get_parameter('spawner_node_name').get_parameter_value().string_value
+        )
+        self.stable_ready_count = (
+            self.get_parameter('stable_ready_count').get_parameter_value().integer_value
+        )
         self.clock_ok = False
         self.odom_ok = False
         self.controller_ok = False
@@ -66,7 +69,6 @@ class SimReadyNotifier(Node):
         if self.spawner_node_name in graph_nodes:
             return False
         return True
-
 
     def check_ready(self):
         if self.done:

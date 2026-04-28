@@ -5,7 +5,7 @@ import pytest
 
 from rosbot_deepc.deepc_solver import DeePCSolver
 from rosbot_deepc.utils import (
-    encode_yaw_output,
+    encode_deepc_output,
     load_dataset_csv,
     load_reference_csv,
     normalize_yaw_representation,
@@ -17,36 +17,22 @@ from rosbot_deepc.utils import (
 def test_yaw_representation_only_accepts_current_names():
     assert normalize_yaw_representation('wrap') == 'wrap'
     assert normalize_yaw_representation('unwrap') == 'unwrap'
-    assert normalize_yaw_representation('trig') == 'trig'
 
-    for value in ('auto', 'wrap_scalar', 'unwrap_scalar'):
+    for value in ('auto', 'wrap_scalar', 'unwrap_scalar', 'trig'):
         with pytest.raises(ValueError):
             normalize_yaw_representation(value)
 
 
-def test_encode_yaw_output_shapes_and_wrapping():
-    scalar = encode_yaw_output(
+def test_encode_deepc_output_shape_and_wrapping():
+    scalar = encode_deepc_output(
         x=1.0,
         y=2.0,
         yaw=4.0,
-        v=0.3,
-        w=-0.4,
         yaw_representation='wrap',
     )
-    trig = encode_yaw_output(
-        x=1.0,
-        y=2.0,
-        yaw=4.0,
-        v=0.3,
-        w=-0.4,
-        yaw_representation='trig',
-    )
 
-    assert len(scalar) == 5
+    assert len(scalar) == 3
     assert scalar[2] == pytest.approx(wrap_to_pi(4.0))
-    assert len(trig) == 6
-    assert trig[2] == pytest.approx(math.cos(4.0))
-    assert trig[3] == pytest.approx(math.sin(4.0))
 
 
 def test_load_dataset_csv_aligns_shifted_outputs(tmp_path):
@@ -69,8 +55,8 @@ def test_load_dataset_csv_aligns_shifted_outputs(tmp_path):
     )
 
     np.testing.assert_allclose(u_data, [[0.1, 0.3], [0.2, 0.4]])
-    assert y_data.shape == (5, 2)
-    np.testing.assert_allclose(y_data[:, 0], [1.0, 0.0, 0.5, 0.03, 0.04])
+    assert y_data.shape == (3, 2)
+    np.testing.assert_allclose(y_data[:, 0], [1.0, 0.0, 0.5])
 
 
 def test_load_reference_csv_infers_yaw_velocity_and_stop(tmp_path):
@@ -109,10 +95,10 @@ def test_unicycle_tracking_law_uses_feedforward_and_clamps():
 
 
 def test_solver_diag_requires_exact_dimension():
-    diag = DeePCSolver._make_diag([1.0, 2.0, 3.0, 4.0, 5.0], 5, 'Q_diag')
-    np.testing.assert_allclose(np.diag(diag), [1.0, 2.0, 3.0, 4.0, 5.0])
+    diag = DeePCSolver._make_diag([1.0, 2.0, 3.0], 3, 'Q_diag')
+    np.testing.assert_allclose(np.diag(diag), [1.0, 2.0, 3.0])
 
     with pytest.raises(ValueError):
-        DeePCSolver._make_diag([1.0, 2.0, 3.0], 5, 'Q_diag')
+        DeePCSolver._make_diag([1.0, 2.0], 3, 'Q_diag')
     with pytest.raises(ValueError):
         DeePCSolver._make_diag([1.0, -2.0], 2, 'R_diag')

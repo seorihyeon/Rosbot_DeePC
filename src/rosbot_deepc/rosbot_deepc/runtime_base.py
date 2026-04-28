@@ -1,10 +1,9 @@
-#!/usr/bin/env python3
 import math
 import threading
 from typing import Callable, Optional, Tuple
 
 import rclpy
-from geometry_msgs.msg import TwistStamped
+from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from std_srvs.srv import Trigger
@@ -12,9 +11,8 @@ from std_srvs.srv import Trigger
 from .utils import (
     normalize_yaw_representation,
     quat_to_yaw,
+    signed_angle_diff,
     unwrap_angle,
-    wrap_to_pi,
-    yaw_representation_uses_trig,
     yaw_representation_uses_unwrapped_scalar,
 )
 
@@ -58,7 +56,6 @@ class RuntimeBase(Node):
         self.uses_unwrapped_yaw = yaw_representation_uses_unwrapped_scalar(
             self.yaw_representation
         )
-        self.uses_trig_yaw = yaw_representation_uses_trig(self.yaw_representation)
 
         self.reset_before_start = bool(self.get_parameter("reset_before_start").value)
         self.reset_service = str(self.get_parameter("reset_service").value)
@@ -75,7 +72,7 @@ class RuntimeBase(Node):
         self.max_abs_measured_w = float(self.get_parameter("max_abs_measured_w").value)
 
     def _create_runtime_interfaces(self) -> None:
-        self.cmd_pub = self.create_publisher(TwistStamped, self.cmd_topic, 10)
+        self.cmd_pub = self.create_publisher(Twist, self.cmd_topic, 10)
         self.odom_sub = self.create_subscription(Odometry, self.odom_topic, self.on_odom, 50)
 
         self.reset_cli = None
@@ -84,6 +81,7 @@ class RuntimeBase(Node):
 
     def _init_runtime_state(self) -> None:
         self.finished = False
+        self._shutdown_requested = False
         self.last_odom: Optional[Odometry] = None
         self.odom_lock = threading.Lock()
         self.last_odom_stamp_ns = -1
@@ -145,7 +143,7 @@ class RuntimeBase(Node):
                 if prev_raw_yaw is not None and stamp_ns > prev_stamp_ns:
                     dt_sec = (stamp_ns - prev_stamp_ns) * 1.0e-9
                     if dt_sec > 0.0:
-                        w_est = wrap_to_pi(raw_yaw - prev_raw_yaw) / dt_sec
+                        w_est = signed_angle_diff(raw_yaw - prev_raw_yaw) / dt_sec
 
                 outlier = (
                     (not math.isfinite(raw_w))
@@ -178,7 +176,10 @@ class RuntimeBase(Node):
                         )
                     ):
                         self.last_valid_measured_w = w_meas
-                    if self.measured_w_outlier_count <= 5 or self.measured_w_outlier_count % 50 == 0:
+                    if (
+                        self.measured_w_outlier_count <= 5
+                        or self.measured_w_outlier_count % 50 == 0
+                    ):
                         warn_msg = (
                             "Sanitized odom angular velocity outlier: "
                             f"raw_w={raw_w:+.3f}, used_w={w_meas:+.3f}, "
@@ -239,6 +240,18 @@ class RuntimeBase(Node):
         finally:
             setattr(self, timer_name, None)
 
+    def request_shutdown(self) -> None:
+        if self._shutdown_requested:
+            return
+        self._shutdown_requested = True
+
+        def _shutdown() -> None:
+            if rclpy.ok():
+                rclpy.shutdown()
+
+        thread = threading.Thread(target=_shutdown, daemon=True)
+        thread.start()
+
     def cancel_common_timers(self) -> None:
         self._cancel_reset_timeout_timer()
         self._cancel_startup_timer()
@@ -256,7 +269,7 @@ class RuntimeBase(Node):
         self.finished = True
         self._cancel_reset_timeout_timer()
         self._cancel_startup_timer()
-        rclpy.shutdown()
+        self.request_shutdown()
 
     def _on_reset_timeout(self) -> None:
         self._cancel_reset_timeout_timer()
@@ -334,7 +347,8 @@ class RuntimeBase(Node):
 
         if self.reset_before_start and self.reset_cli is None:
             self.get_logger().info(
-                "reset_before_start is true but reset service is disabled; proceeding without reset"
+                "reset_before_start is true but reset service is disabled; "
+                "proceeding without reset"
             )
 
         if wait_for_first_odom_on_skip_reset:
@@ -350,10 +364,10 @@ class RuntimeBase(Node):
         if not rclpy.ok():
             return
 
-        msg = TwistStamped()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.twist.linear.x = float(v)
-        msg.twist.angular.z = float(w)
+        msg = Twist()
+        #msg.header.stamp = self.get_clock().now().to_msg()
+        msg.linear.x = float(v)
+        msg.angular.z = float(w)
         self.cmd_pub.publish(msg)
 
     def publish_stop_commands(self, repeat: int = 5) -> None:

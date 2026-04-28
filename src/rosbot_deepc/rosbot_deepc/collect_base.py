@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import csv
 import os
 from datetime import datetime
@@ -68,4 +67,5 @@ class CollectBase(RuntimeBase):
         self.cancel_common_timers()
         self.publish_stop_commands()
         self.close_output_csv()
-        rclpy.shutdown()
+        self.get_logger().info("Finished data collection, shutting down...")
+        self.request_shutdown()

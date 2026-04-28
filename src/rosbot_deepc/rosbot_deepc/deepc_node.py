@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import csv
 import os
 from collections import deque
@@ -14,14 +13,13 @@ from .utils import (
     RefPoint,
     check_PE_condition,
     clamp,
-    encode_yaw_output,
+    encode_deepc_output,
     load_dataset_csv,
     load_multiple_dataset_csvs,
     resolve_dataset_path,
     stack_history_with_zero_padding,
     unicycle_tracking_law,
     wrap_to_pi,
-    yaw_prediction_fields,
 )
 
 
@@ -76,7 +74,7 @@ class DeePCNode(TrackingBase):
 
         self.declare_parameter("Tini", 12)
         self.declare_parameter("horizon", 15)
-        self.declare_parameter("Q_diag", [30.0, 45.0, 12.0, 5.0, 2.0])
+        self.declare_parameter("Q_diag", [30.0, 45.0, 12.0])
         self.declare_parameter("R_diag", [1.0, 0.2])
         self.declare_parameter("lambda_g", 1.0)
         self.declare_parameter("lambda_s", 1.0e6)
@@ -156,8 +154,6 @@ class DeePCNode(TrackingBase):
                 csv_path,
                 drop_initial_rows=self.drop_initial_rows,
                 max_rows=self.max_rows_per_dataset,
-                sanitize_measured_w=self.sanitize_odom_twist,
-                max_abs_measured_w=self.max_abs_measured_w,
                 yaw_representation=self.yaw_representation,
                 y_shift_steps=self.dataset_y_shift_steps,
             )
@@ -169,8 +165,6 @@ class DeePCNode(TrackingBase):
                 drop_initial_rows=self.drop_initial_rows,
                 min_rows_per_dataset=self.min_rows_per_dataset,
                 max_rows_per_dataset=self.max_rows_per_dataset,
-                sanitize_measured_w=self.sanitize_odom_twist,
-                max_abs_measured_w=self.max_abs_measured_w,
                 yaw_representation=self.yaw_representation,
                 y_shift_steps=self.dataset_y_shift_steps,
             )
@@ -267,28 +261,22 @@ class DeePCNode(TrackingBase):
         x: float,
         y: float,
         yaw: float,
-        v: float,
-        w: float,
     ) -> np.ndarray:
         return np.asarray(
-            encode_yaw_output(
+            encode_deepc_output(
                 x=x,
                 y=y,
                 yaw=yaw,
-                v=v,
-                w=w,
                 yaw_representation=self.yaw_representation,
             ),
             dtype=np.float64,
         )
 
     def reference_output_vector(self, ref: RefPoint) -> List[float]:
-        return encode_yaw_output(
+        return encode_deepc_output(
             x=ref.x,
             y=ref.y,
             yaw=ref.yaw,
-            v=ref.v,
-            w=ref.w,
             yaw_representation=self.yaw_representation,
         )
 
@@ -378,22 +366,12 @@ class DeePCNode(TrackingBase):
                 "y_x": float(y_pred[y_base + 0]),
                 "y_y": float(y_pred[y_base + 1]),
             }
-            if self.uses_trig_yaw:
-                row.update({
-                    "y_cos_yaw": float(y_pred[y_base + 2]),
-                    "y_sin_yaw": float(y_pred[y_base + 3]),
-                    "y_v": float(y_pred[y_base + 4]),
-                    "y_w": float(y_pred[y_base + 5]),
-                })
-            else:
-                yaw_pred = float(y_pred[y_base + 2])
-                if not self.uses_unwrapped_yaw:
-                    yaw_pred = wrap_to_pi(yaw_pred)
-                row.update({
-                    "y_yaw": yaw_pred,
-                    "y_v": float(y_pred[y_base + 3]),
-                    "y_w": float(y_pred[y_base + 4]),
-                })
+            yaw_pred = float(y_pred[y_base + 2])
+            if not self.uses_unwrapped_yaw:
+                yaw_pred = wrap_to_pi(yaw_pred)
+            row.update({
+                "y_yaw": yaw_pred,
+            })
             self.pred_rows.append(row)
 
     def get_solver_dims(self) -> Tuple[int, int]:
@@ -417,9 +395,7 @@ class DeePCNode(TrackingBase):
             "step", "mode", "sim_time_sec",
             "ref_idx", "pred_step",
             "u_v", "u_w",
-            "y_x", "y_y",
-            *yaw_prediction_fields(self.yaw_representation),
-            "y_v", "y_w",
+            "y_x", "y_y", "y_yaw",
         ]
 
         with open(csv_path, "w", newline="") as f:
@@ -454,7 +430,7 @@ class DeePCNode(TrackingBase):
         track_ref = self.get_tracking_ref()
 
         e_x, e_y, e_psi = self.compute_body_frame_error(track_ref, x, y, yaw)
-        y_now = self.encode_solver_output(x, y, yaw, v_meas, w_meas)
+        y_now = self.encode_solver_output(x, y, yaw)
         self.update_history_before_solve(y_now)
 
         cmd_v = 0.0

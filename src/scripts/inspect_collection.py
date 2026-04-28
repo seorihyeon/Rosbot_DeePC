@@ -1,15 +1,25 @@
-#!/usr/bin/env python3
 from __future__ import annotations
 
 import argparse
+import os
+import warnings
 from pathlib import Path
 from typing import Iterable
+
+os.environ.setdefault("MPLCONFIGDIR", "/ws/.cache/matplotlib")
+Path(os.environ["MPLCONFIGDIR"]).mkdir(parents=True, exist_ok=True)
+warnings.filterwarnings(
+    "ignore",
+    message="Unable to import Axes3D.*",
+    category=UserWarning,
+    module="matplotlib.projections",
+)
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-RESULTS_DIR = Path("/ws/diffbot_datasets/")
+RESULTS_DIR = Path("/ws/datasets/")
 
 CORE_COLUMNS = {
     "step",
@@ -96,7 +106,7 @@ def resolve_paths(inputs: Iterable[str]) -> list[Path]:
     return resolved
 
 
-def wrap_to_pi(angle: np.ndarray) -> np.ndarray:
+def signed_angle_diff(angle: np.ndarray) -> np.ndarray:
     return np.arctan2(np.sin(angle), np.cos(angle))
 
 
@@ -154,7 +164,7 @@ def summarize(df: pd.DataFrame, active_start: int) -> dict[str, float | str]:
 
     if has_reference(df):
         pos_err = np.hypot(df["x"] - df["ref_x"], df["y"] - df["ref_y"]).to_numpy()
-        yaw_err = wrap_to_pi((df["yaw"] - df["ref_yaw"]).to_numpy())
+        yaw_err = signed_angle_diff((df["yaw"] - df["ref_yaw"]).to_numpy())
         summary["pos_err_mean_cm"] = float(pos_err.mean() * 100.0)
         summary["pos_err_max_cm"] = float(pos_err.max() * 100.0)
         summary["yaw_err_mean_deg"] = float(np.rad2deg(np.abs(yaw_err)).mean())
@@ -206,7 +216,9 @@ def make_figure(df_raw: pd.DataFrame, csv_path: Path, trim_start: bool, motion_e
     ax = axes[0, 1]
     if ref_mode:
         pos_err = np.hypot(df["x"] - df["ref_x"], df["y"] - df["ref_y"]).to_numpy()
-        yaw_err_deg = np.rad2deg(wrap_to_pi((df["yaw"] - df["ref_yaw"]).to_numpy()))
+        yaw_err_deg = np.rad2deg(
+            signed_angle_diff((df["yaw"] - df["ref_yaw"]).to_numpy())
+        )
         ax.plot(t, pos_err, label="position error")
         ax.set_title("Tracking error")
         ax.set_xlabel("time [s]")
@@ -348,7 +360,8 @@ def main() -> None:
             fig.savefig(out_path, dpi=150, bbox_inches="tight")
             print(f"Saved: {out_path}")
 
-    plt.show()
+    if not args.save:
+        plt.show()
 
 
 if __name__ == "__main__":

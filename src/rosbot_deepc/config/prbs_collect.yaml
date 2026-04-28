@@ -49,5 +49,5 @@ prbs_collect_node:
     op_x_max: 1.0
     op_y_min: -1.0
     op_y_max: 1.0
-    op_yaw_min: -3.14
-    op_yaw_max: 3.14
+    op_yaw_min: -3.141592653589793
+    op_yaw_max: 3.141592653589793

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import csv
 import math
 import os
@@ -20,6 +19,7 @@ from .utils import (
     build_path_msg,
     load_reference_csv,
     make_pose_stamped,
+    signed_angle_diff,
     wrap_to_pi,
 )
 
@@ -183,7 +183,7 @@ class TrackingBase(RuntimeBase):
         for idx, ref in enumerate(self.ref_traj):
             if idx < last_idx:
                 next_yaw = self.ref_traj[idx + 1].yaw
-                ref.w = wrap_to_pi(next_yaw - ref.yaw) / max(self.dt, 1.0e-9)
+                ref.w = signed_angle_diff(next_yaw - ref.yaw) / max(self.dt, 1.0e-9)
             else:
                 ref.w = 0.0
 
@@ -377,7 +377,7 @@ class TrackingBase(RuntimeBase):
         self.publish_stop_commands()
         self.save_run_csv()
         self.save_additional_tracking_outputs()
-        rclpy.shutdown()
+        self.request_shutdown()
 
     def check_finish_condition(self, e_x: float, e_y: float, e_psi: float) -> None:
         pos_err = math.sqrt(e_x * e_x + e_y * e_y)

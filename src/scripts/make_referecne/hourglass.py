@@ -95,8 +95,12 @@ def resample_by_arclength(points, ds):
     return np.column_stack([x_new, y_new])
 
 
-def unwrap_to_pi(angle):
-    return (angle + np.pi) % (2.0 * np.pi) - np.pi
+def wrap_to_pi(angle):
+    raw = float(angle)
+    wrapped = (raw + np.pi) % (2.0 * np.pi) - np.pi
+    if np.isclose(wrapped, -np.pi, atol=1.0e-12) and raw > 0.0:
+        return np.pi
+    return wrapped
 
 
 def compute_reference_columns(points, dt):
@@ -111,7 +115,7 @@ def compute_reference_columns(points, dt):
     step_dy = np.diff(y, append=y[-1])
     v = np.hypot(step_dx, step_dy) / dt
 
-    yaw_wrapped = np.array([unwrap_to_pi(a) for a in yaw])
+    yaw_wrapped = np.array([wrap_to_pi(a) for a in yaw])
     yaw_unwrapped = np.unwrap(yaw_wrapped)
     w = np.gradient(yaw_unwrapped, dt)
 
@@ -179,7 +183,7 @@ def preview(points):
 
 
 def main():
-    dt = 0.1
+    dt = 0.03
     ref_speed = 0.25
     final_stop_steps = 20
     csv_path = "/ws/ref/hourglass_reference.csv"

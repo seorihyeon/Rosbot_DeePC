@@ -1,7 +1,16 @@
-#!/bin/bash
-pkill -f "gz sim"
-pkill -f controller_manager
-pkill -f parameter_bridge
-pkill -f robot_state_publisher
-pkill -f ros_gz
-pkill -f spawner
+#!/usr/bin/env bash
+
+patterns=(
+  "gz sim"
+  "ign gazebo"
+  "ruby .*ign .*gazebo"
+  "controller_manager"
+  "parameter_bridge"
+  "robot_state_publisher"
+  "ros_gz"
+  "spawner"
+)
+
+for pattern in "${patterns[@]}"; do
+  pkill -f "${pattern}" 2>/dev/null || true
+done

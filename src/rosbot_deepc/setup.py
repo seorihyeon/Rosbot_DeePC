@@ -32,10 +32,10 @@ setup(
     },
     entry_points={
         'console_scripts': [
-        'reference_collect_node = rosbot_deepc.reference_collect_node:main',
-        'random_collect_node = rosbot_deepc.random_collect_node:main',
-        'prbs_collect_node = rosbot_deepc.prbs_collect_node:main',
-        'deepc_node = rosbot_deepc.deepc_node:main',
+            'reference_collect_node = rosbot_deepc.reference_collect_node:main',
+            'random_collect_node = rosbot_deepc.random_collect_node:main',
+            'prbs_collect_node = rosbot_deepc.prbs_collect_node:main',
+            'deepc_node = rosbot_deepc.deepc_node:main',
         ],
     },
 )

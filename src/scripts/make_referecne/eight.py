@@ -3,14 +3,18 @@ import csv
 import math
 import os
 
-DT = 0.1          # deepc_params.yaml 의 sample_time 과 맞춤
+DT = 0.03          # deepc_params.yaml 의 sample_time 과 맞춤
 RADIUS = 1.0       # [m]
 SPEED = 0.30       # [m/s]
 OUT_PATH = "/ws/ref/eight_reference.csv"
 
 
 def wrap_to_pi(angle: float) -> float:
-    return (angle + math.pi) % (2.0 * math.pi) - math.pi
+    raw = float(angle)
+    wrapped = (raw + math.pi) % (2.0 * math.pi) - math.pi
+    if math.isclose(wrapped, -math.pi, abs_tol=1.0e-12) and raw > 0.0:
+        return math.pi
+    return wrapped
 
 
 def append_circle_segment(

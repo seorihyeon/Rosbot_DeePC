@@ -71,9 +71,9 @@ class DeePCSolver:
             Hy = block_hankel(y_data, self.L)
 
         self.Up = Hu[: self.u_dim * self.Tini, :]
-        self.Uf = Hu[self.u_dim * self.Tini :, :]
+        self.Uf = Hu[self.u_dim * self.Tini:, :]
         self.Yp = Hy[: self.y_dim * self.Tini, :]
-        self.Yf = Hy[self.y_dim * self.Tini :, :]
+        self.Yf = Hy[self.y_dim * self.Tini:, :]
         self.n_col = Hu.shape[1]
 
         Qy = self._make_diag(self.Q_diag, expected_dim=self.y_dim, name="Q_diag")
@@ -108,7 +108,7 @@ class DeePCSolver:
         ]
 
         for k in range(self.N):
-            uk = self.u_f[k * self.u_dim : (k + 1) * self.u_dim]
+            uk = self.u_f[k * self.u_dim: (k + 1) * self.u_dim]
             constraints += [uk >= self.u_min_p, uk <= self.u_max_p]
 
         self.problem = cp.Problem(cp.Minimize(cost), constraints)

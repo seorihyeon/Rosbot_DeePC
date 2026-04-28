@@ -7,7 +7,7 @@ index cb44646..be7a5a6 100644
          </ros>
        </plugin>
 +
-+      <plugin filename="gz-sim-odometry-publisher-system" name="gz::sim::systems::OdometryPublisher">
++      <plugin filename="ignition-gazebo-odometry-publisher-system" name="ignition::gazebo::v6::systems::OdometryPublisher">
 +        <odom_publish_frequency>50</odom_publish_frequency>
 +        <dimensions>2</dimensions>
 +        <odom_topic>/model/rosbot/odometry_gt</odom_topic>

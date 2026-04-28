@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import rclpy
 
 from .collect_base import CollectBase
-from .utils import body_frame_pose_error, clamp, unicycle_tracking_law
+from .utils import body_frame_pose_error, clamp, unicycle_tracking_law, wrap_to_pi
 
 
 @dataclass
@@ -89,8 +89,8 @@ class PRBSCollectNode(CollectBase):
         self.declare_parameter("op_x_max", 0.8)
         self.declare_parameter("op_y_min", -0.8)
         self.declare_parameter("op_y_max", 0.8)
-        self.declare_parameter("op_yaw_min", -3.14)
-        self.declare_parameter("op_yaw_max", 3.14)
+        self.declare_parameter("op_yaw_min", -math.pi)
+        self.declare_parameter("op_yaw_max", math.pi)
 
         self.declare_parameter("op_sample_mode", "global")   # global | around_start
         self.declare_parameter("op_dx", 0.5)                 # around_start일 때 x 범위
@@ -99,14 +99,16 @@ class PRBSCollectNode(CollectBase):
 
     def _load_prbs_parameters(self) -> None:
         self.dataset_steps = int(self.get_parameter("dataset_steps").value)
-        self.progress_log_interval_steps = int(self.get_parameter("progress_log_interval_steps").value)
+        self.progress_log_interval_steps = int(
+            self.get_parameter("progress_log_interval_steps").value
+        )
         if self.progress_log_interval_steps <= 0:
             raise ValueError("progress_log_interval_steps must be positive")
 
         self.use_explicit_target_pose = bool(self.get_parameter("use_explicit_target_pose").value)
         self.target_x = float(self.get_parameter("target_x").value)
         self.target_y = float(self.get_parameter("target_y").value)
-        self.target_yaw = float(self.get_parameter("target_yaw").value)
+        self.target_yaw = wrap_to_pi(float(self.get_parameter("target_yaw").value))
 
         self.kx = float(self.get_parameter("kx").value)
         self.ky = float(self.get_parameter("ky").value)
@@ -123,9 +125,13 @@ class PRBSCollectNode(CollectBase):
         self.guard_pos_err = float(self.get_parameter("guard_pos_err").value)
         self.guard_yaw_err = float(self.get_parameter("guard_yaw_err").value)
         self.guard_recovery_steps = int(self.get_parameter("guard_recovery_steps").value)
-        self.disable_prbs_during_recovery = bool(self.get_parameter("disable_prbs_during_recovery").value)
+        self.disable_prbs_during_recovery = bool(
+            self.get_parameter("disable_prbs_during_recovery").value
+        )
 
-        self.randomize_operating_point = bool(self.get_parameter("randomize_operating_point").value)
+        self.randomize_operating_point = bool(
+            self.get_parameter("randomize_operating_point").value
+        )
         self.switch_interval_steps = int(self.get_parameter("switch_interval_steps").value)
 
         self.op_x_min = float(self.get_parameter("op_x_min").value)
@@ -193,14 +199,22 @@ class PRBSCollectNode(CollectBase):
         self.start_yaw = yaw
 
         if self.use_explicit_target_pose:
-            self.target_pose = PoseTarget(self.target_x, self.target_y, self.target_yaw)
+            self.target_pose = PoseTarget(
+                self.target_x,
+                self.target_y,
+                wrap_to_pi(self.target_yaw),
+            )
         else:
             self.target_pose = PoseTarget(x, y, yaw)
 
         if self.randomize_operating_point:
             self.target_pose = self.sample_random_target_pose()
         elif self.use_explicit_target_pose:
-            self.target_pose = PoseTarget(self.target_x, self.target_y, self.target_yaw)
+            self.target_pose = PoseTarget(
+                self.target_x,
+                self.target_y,
+                wrap_to_pi(self.target_yaw),
+            )
         else:
             self.target_pose = PoseTarget(x, y, yaw)
 
@@ -224,13 +238,17 @@ class PRBSCollectNode(CollectBase):
         self.get_logger().info(f"warmup_steps  : {self.warmup_steps}")
         self.get_logger().info(f"output_file   : {self.csv_path}")
         self.get_logger().info(
-            f"target_pose   : ({self.target_pose.x:+.3f}, {self.target_pose.y:+.3f}, {self.target_pose.yaw:+.3f})"
+            "target_pose   : "
+            f"({self.target_pose.x:+.3f}, {self.target_pose.y:+.3f}, "
+            f"{self.target_pose.yaw:+.3f})"
         )
         self.get_logger().info(
             f"prbs_amp      : dv={self.prbs_v_amplitude:+.3f}, dw={self.prbs_w_amplitude:+.3f}"
         )
         self.get_logger().info(
-            f"prbs_switch   : v={self.prbs_v_switch_steps} steps, w={self.prbs_w_switch_steps} steps"
+            "prbs_switch   : "
+            f"v={self.prbs_v_switch_steps} steps, "
+            f"w={self.prbs_w_switch_steps} steps"
         )
 
     def sample_random_target_pose(self):
@@ -247,9 +265,14 @@ class PRBSCollectNode(CollectBase):
             ty = random.uniform(self.op_y_min, self.op_y_max)
             tyaw = random.uniform(self.op_yaw_min, self.op_yaw_max)
 
-        return PoseTarget(tx, ty, tyaw)
+        return PoseTarget(tx, ty, wrap_to_pi(tyaw))
 
-    def compute_body_frame_error(self, x: float, y: float, yaw: float) -> tuple[float, float, float]:
+    def compute_body_frame_error(
+        self,
+        x: float,
+        y: float,
+        yaw: float,
+    ) -> tuple[float, float, float]:
         assert self.target_pose is not None
         return body_frame_pose_error(
             self.target_pose.x,
@@ -372,7 +395,8 @@ class PRBSCollectNode(CollectBase):
         sim_time = self.get_clock().now().nanoseconds * 1e-9
         self.write_csv_row([
             self.step_idx, f"{sim_time:.6f}",
-            f"{self.target_pose.x:.6f}", f"{self.target_pose.y:.6f}", f"{self.target_pose.yaw:.6f}",
+            f"{self.target_pose.x:.6f}", f"{self.target_pose.y:.6f}",
+            f"{self.target_pose.yaw:.6f}",
             f"{x:.6f}", f"{y:.6f}", f"{yaw:.6f}",
             f"{e_x:.6f}", f"{e_y:.6f}", f"{e_psi:.6f}",
             f"{base_cmd_v:.6f}", f"{base_cmd_w:.6f}",

@@ -9,11 +9,19 @@ def quat_to_yaw(x,y,z,w):
     # Calculate yaw from quaternion
     siny_cosp = 2.0*(w*z + x*y)
     cosy_cosp = 1.0 - 2.0*(y*y + z*z)
-    return math.atan2(siny_cosp, cosy_cosp)
+    return wrap_to_pi(math.atan2(siny_cosp, cosy_cosp))
 
 def wrap_to_pi(angle):
-    # Map angle to [-pi, pi]
-    return (angle + math.pi) % (2.0*math.pi) - math.pi
+    # Map yaw to [-pi, pi].
+    raw = float(angle)
+    wrapped = (raw + math.pi) % (2.0*math.pi) - math.pi
+    if math.isclose(wrapped, -math.pi, abs_tol=1.0e-12) and raw > 0.0:
+        return math.pi
+    return wrapped
+
+def signed_angle_diff(angle):
+    # Map angle differences to [-pi, pi].
+    return wrap_to_pi(angle)
 
 class CircleTest(Node):
     def __init__(self):
@@ -71,7 +79,7 @@ class CircleTest(Node):
             self.yaw_unwrapped = yaw_raw
             return self.yaw_unwrapped
 
-        dyaw = wrap_to_pi(yaw_raw - self.prev_yaw_raw)
+        dyaw = signed_angle_diff(yaw_raw - self.prev_yaw_raw)
         self.yaw_unwrapped += dyaw
         self.prev_yaw_raw = yaw_raw
         return self.yaw_unwrapped
@@ -133,4 +141,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

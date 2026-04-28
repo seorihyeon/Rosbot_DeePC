@@ -12,8 +12,13 @@ if str(PKG_ROOT) not in sys.path:
 
 from rosbot_deepc.utils import load_dataset_csv, block_hankel
 
-u_data, y_data = load_dataset_csv(csv_path="/ws/datasets/eight.csv", drop_initial_rows=20, max_rows=0,
-    sanitize_measured_w=True, max_abs_measured_w=10.0, yaw_representation="trig", y_shift_steps=0)
+u_data, y_data = load_dataset_csv(
+    csv_path="/ws/datasets/eight.csv",
+    drop_initial_rows=20,
+    max_rows=0,
+    yaw_representation="wrap",
+    y_shift_steps=0,
+)
 
 print(u_data); print(y_data)
 
@@ -34,8 +39,13 @@ Uf = Hu[u_dim*Tini :, :]
 Yp = Hy[: y_dim*Tini, :]
 Yf = Hy[y_dim*Tini :, :]
 
-u_test, y_test = load_dataset_csv(csv_path="/ws/datasets/eight.csv", drop_initial_rows=20, max_rows=0,
-    sanitize_measured_w=True, max_abs_measured_w=10.0, yaw_representation="trig", y_shift_steps=0)
+u_test, y_test = load_dataset_csv(
+    csv_path="/ws/datasets/eight.csv",
+    drop_initial_rows=20,
+    max_rows=0,
+    yaw_representation="wrap",
+    y_shift_steps=0,
+)
 
 anchor = 23
 

@@ -10,3 +10,11 @@ random_collect_node:
     random_hold_steps_min: 4
     random_hold_steps_max: 8
     random_min_command_norm: 0.03
+
+    randomize_initial_pose: true
+    reset_parameter_node: /reset_rosbot_server
+    random_initial_pose_center_x: 0.0
+    random_initial_pose_center_y: 0.0
+    random_initial_pose_radius: 1.0
+    random_initial_yaw_min: -3.141592653589793
+    random_initial_yaw_max: 3.141592653589793

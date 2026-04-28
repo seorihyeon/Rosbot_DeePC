@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import os
 import random
 from pathlib import Path as FilePath
@@ -15,7 +14,9 @@ from .utils import (
     build_path_msg,
     clamp,
     load_reference_csv,
+    signed_angle_diff,
     unicycle_tracking_law,
+    wrap_to_pi,
 )
 
 
@@ -39,7 +40,7 @@ class ReferenceCollectNode(CollectBase):
         self.declare_parameter('path_topic', '/deepc/reference_path')
         self.declare_parameter('append_final_stop_steps', 20)
         self.declare_parameter('reference_csv_list', Parameter.Type.STRING_ARRAY)
-        
+
         self.declare_parameter('kx', 0.8)
         self.declare_parameter('ky', 1.8)
         self.declare_parameter('kpsi', 2.0)
@@ -58,7 +59,7 @@ class ReferenceCollectNode(CollectBase):
         self.path_topic = str(self.get_parameter('path_topic').value)
         self.append_final_stop_steps = int(self.get_parameter('append_final_stop_steps').value)
         self.reference_csv_list = list(self.get_parameter('reference_csv_list').value)
-        
+
         self.kx = float(self.get_parameter('kx').value)
         self.ky = float(self.get_parameter('ky').value)
         self.kpsi = float(self.get_parameter('kpsi').value)
@@ -72,7 +73,10 @@ class ReferenceCollectNode(CollectBase):
         self.perturb_hold_steps_min = int(self.get_parameter('perturb_hold_steps_min').value)
         self.perturb_hold_steps_max = int(self.get_parameter('perturb_hold_steps_max').value)
 
-        if self.perturb_hold_steps_min <= 0 or self.perturb_hold_steps_max < self.perturb_hold_steps_min:
+        if (
+            self.perturb_hold_steps_min <= 0
+            or self.perturb_hold_steps_max < self.perturb_hold_steps_min
+        ):
             raise ValueError("Invalid perturb hold-step range")
 
     def _create_reference_interfaces(self):
@@ -111,6 +115,7 @@ class ReferenceCollectNode(CollectBase):
     def start_next_reference(self):
         self.reference_file_index += 1
         if self.reference_file_index >= len(self.reference_paths):
+            self.get_logger().info("All references completed")
             self.finish_and_shutdown()
             return
 
@@ -119,6 +124,8 @@ class ReferenceCollectNode(CollectBase):
         self.ref_traj = load_reference_csv(
             self.current_reference_path, self.dt, self.append_final_stop_steps
         )
+        if not self.uses_unwrapped_yaw:
+            self.wrap_reference_yaw_in_place()
         self.publish_reference_path()
 
         self.step_idx = 0
@@ -128,6 +135,7 @@ class ReferenceCollectNode(CollectBase):
         self.perturb_hold_count = 0
 
         self.start_with_optional_reset()
+        self.get_logger().info(f"Started reference '{self.current_reference_name}' with {len(self.ref_traj)} steps")
 
     def on_ready_after_reset(self):
         self.open_output_csv(
@@ -142,6 +150,18 @@ class ReferenceCollectNode(CollectBase):
 
     def publish_reference_path(self):
         self.path_msg = build_path_msg(self.ref_traj, frame_id='odom')
+
+    def wrap_reference_yaw_in_place(self):
+        for ref in self.ref_traj:
+            ref.yaw = wrap_to_pi(ref.yaw)
+
+        last_idx = len(self.ref_traj) - 1
+        for idx, ref in enumerate(self.ref_traj):
+            if idx < last_idx:
+                next_yaw = self.ref_traj[idx + 1].yaw
+                ref.w = signed_angle_diff(next_yaw - ref.yaw) / max(self.dt, 1.0e-9)
+            else:
+                ref.w = 0.0
 
     def compute_body_frame_error(self, ref, x, y, yaw):
         return body_frame_pose_error(ref.x, ref.y, ref.yaw, x, y, yaw)
@@ -161,7 +181,7 @@ class ReferenceCollectNode(CollectBase):
             w_min=self.w_min,
             w_max=self.w_max,
         )
-    
+
     def update_perturbation(self):
         if not self.perturb_enable:
             self.current_perturb_v = 0.0
@@ -200,6 +220,7 @@ class ReferenceCollectNode(CollectBase):
             return
 
         if self.step_idx >= len(self.ref_traj):
+            self.get_logger().info(f"Finished reference '{self.current_reference_name}'")
             self.close_output_csv()
             self.start_next_reference()
             return
@@ -207,7 +228,7 @@ class ReferenceCollectNode(CollectBase):
         ref = self.ref_traj[self.step_idx]
         x, y, yaw, v_meas, w_meas = self.current_measured_state()
         e_x, e_y, e_psi = self.compute_body_frame_error(ref, x, y, yaw)
-        
+
         cmd_v_nominal, cmd_w_nominal = self.baseline_tracking_law(ref, e_x, e_y, e_psi)
         cmd_v, cmd_w = self.apply_perturbation(cmd_v_nominal, cmd_w_nominal)
 
@@ -220,6 +241,8 @@ class ReferenceCollectNode(CollectBase):
             f'{cmd_v:.6f}', f'{cmd_w:.6f}',
             f'{x:.6f}', f'{y:.6f}', f'{yaw:.6f}', f'{v_meas:.6f}', f'{w_meas:.6f}'
         ])
+        if self.step_idx % 50 == 0:
+            self.get_logger().info(f"{self.step_idx}/{len(self.ref_traj)} complete")
         self.step_idx += 1
 
 

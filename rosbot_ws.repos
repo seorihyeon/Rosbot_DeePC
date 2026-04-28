@@ -6,12 +6,12 @@ repositories:
   husarion_controllers:
     type: git
     url: https://github.com/husarion/husarion_controllers
-    version: 5f42f604dd1d3d5187e36cce125ec8fdb0b41f2c
+    version: 59551e0a5dd2d9933caa13cf0b0990a7a10dbd6f
   husarion_gz_worlds:
     type: git
     url: https://github.com/husarion/husarion_gz_worlds
-    version: 4f1fdd1d09b4d524261d9c335816439c5f11fb44
+    version: 0d61d49485d72ab717c557c1f7fc5baa45592c75
   rosbot_ros:
     type: git
     url: https://github.com/husarion/rosbot_ros.git
-    version: 614d6b6fc84656fe4fb080ed53b2aafe0c2b269b
+    version: 5a42ca181fbac0b5eb1020795282785561a473f4

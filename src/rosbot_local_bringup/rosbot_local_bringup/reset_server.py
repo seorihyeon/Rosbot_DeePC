@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import math
+import threading
 import time
 from typing import Optional
 
@@ -9,7 +10,7 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 
-from geometry_msgs.msg import TwistStamped, Pose
+from geometry_msgs.msg import Twist, Pose
 from ros_gz_interfaces.msg import Entity
 from ros_gz_interfaces.srv import SetEntityPose
 from std_srvs.srv import Trigger
@@ -40,10 +41,6 @@ class ResetRosbotServer(Node):
         self.entity_name = self.get_parameter('entity_name').value
         self.entity_type = self.get_parameter('entity_type').value
         self.frame_id = self.get_parameter('frame_id').value
-        self.target_x = self.get_parameter('target_x').value
-        self.target_y = self.get_parameter('target_y').value
-        self.target_z = self.get_parameter('target_z').value
-        self.target_yaw = self.get_parameter('target_yaw').value
         self.pre_zero_publish_count = self.get_parameter('pre_zero_publish_count').value
         self.post_zero_publish_count = self.get_parameter('post_zero_publish_count').value
         self.zero_publish_period = self.get_parameter('zero_publish_period').value
@@ -58,7 +55,7 @@ class ResetRosbotServer(Node):
         self.reset_srv_group = ReentrantCallbackGroup()
         self.pose_client_group = ReentrantCallbackGroup()
 
-        self.cmd_pub = self.create_publisher(TwistStamped, self.cmd_vel_topic, cmd_vel_qos)
+        self.cmd_pub = self.create_publisher(Twist, self.cmd_vel_topic, cmd_vel_qos)
         self.reset_srv = self.create_service(
             Trigger,
             self.reset_service,
@@ -78,16 +75,14 @@ class ResetRosbotServer(Node):
             % (self.reset_service, self.cmd_vel_topic, self.set_pose_service, self.entity_name)
         )
 
-    def make_zero_twist(self) -> TwistStamped:
-        msg = TwistStamped()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = self.frame_id
-        msg.twist.linear.x = 0.0
-        msg.twist.linear.y = 0.0
-        msg.twist.linear.z = 0.0
-        msg.twist.angular.x = 0.0
-        msg.twist.angular.y = 0.0
-        msg.twist.angular.z = 0.0
+    def make_zero_twist(self) -> Twist:
+        msg = Twist()
+        msg.linear.x = 0.0
+        msg.linear.y = 0.0
+        msg.linear.z = 0.0
+        msg.angular.x = 0.0
+        msg.angular.y = 0.0
+        msg.angular.z = 0.0
         return msg
 
     def publish_zero_burst(self, count: int) -> None:
@@ -96,22 +91,59 @@ class ResetRosbotServer(Node):
             if self.zero_publish_period > 0.0:
                 time.sleep(self.zero_publish_period)
 
-    def make_pose_request(self) -> SetEntityPose.Request:
+    def read_target_pose(self) -> tuple[float, float, float, float]:
+        x = float(self.get_parameter('target_x').value)
+        y = float(self.get_parameter('target_y').value)
+        z = float(self.get_parameter('target_z').value)
+        yaw = float(self.get_parameter('target_yaw').value)
+
+        values = {
+            'target_x': x,
+            'target_y': y,
+            'target_z': z,
+            'target_yaw': yaw,
+        }
+        invalid = [name for name, value in values.items() if not math.isfinite(value)]
+        if invalid:
+            raise ValueError('non-finite reset pose parameter(s): ' + ', '.join(invalid))
+
+        return x, y, z, yaw
+
+    def make_pose_request(
+        self,
+        target_x: float,
+        target_y: float,
+        target_z: float,
+        target_yaw: float,
+    ) -> SetEntityPose.Request:
         req = SetEntityPose.Request()
         req.entity.name = self.entity_name
         req.entity.type = self.entity_type
 
         req.pose = Pose()
-        req.pose.position.x = self.target_x
-        req.pose.position.y = self.target_y
-        req.pose.position.z = self.target_z
+        req.pose.position.x = target_x
+        req.pose.position.y = target_y
+        req.pose.position.z = target_z
 
-        half_yaw = self.target_yaw * 0.5
+        half_yaw = target_yaw * 0.5
         req.pose.orientation.x = 0.0
         req.pose.orientation.y = 0.0
         req.pose.orientation.z = math.sin(half_yaw)
         req.pose.orientation.w = math.cos(half_yaw)
         return req
+
+    def call_set_pose(self, request: SetEntityPose.Request):
+        future = self.pose_client.call_async(request)
+        done_event = threading.Event()
+        future.add_done_callback(lambda _: done_event.set())
+
+        if not done_event.wait(timeout=self.service_timeout_sec):
+            future.cancel()
+            raise TimeoutError(
+                f'set_pose did not respond within {self.service_timeout_sec:.1f} sec'
+            )
+
+        return future.result()
 
     def perform_reset(self) -> tuple[bool, str]:
         if self.is_busy:
@@ -120,7 +152,20 @@ class ResetRosbotServer(Node):
             return False, msg
 
         self.is_busy = True
-        self.get_logger().info('reset request received')
+
+        try:
+            target_x, target_y, target_z, target_yaw = self.read_target_pose()
+        except ValueError as exc:
+            msg = f'invalid reset pose: {exc}'
+            self.get_logger().error(msg)
+            self.is_busy = False
+            return False, msg
+
+        self.get_logger().info(
+            'reset request received: '
+            f'x={target_x:+.3f}, y={target_y:+.3f}, '
+            f'z={target_z:+.3f}, yaw={target_yaw:+.3f}'
+        )
         self.publish_zero_burst(self.pre_zero_publish_count)
 
         if not self.pose_client.wait_for_service(timeout_sec=self.service_timeout_sec):
@@ -134,9 +179,8 @@ class ResetRosbotServer(Node):
             return False, msg
 
         try:
-            resp = self.pose_client.call(
-                self.make_pose_request(),
-                timeout_sec=self.service_timeout_sec,
+            resp = self.call_set_pose(
+                self.make_pose_request(target_x, target_y, target_z, target_yaw)
             )
             if resp is None or not resp.success:
                 msg = 'set_pose returned success=false'
@@ -150,7 +194,10 @@ class ResetRosbotServer(Node):
             self.publish_zero_burst(self.post_zero_publish_count)
             self.is_busy = False
 
-        msg = 'pose reset succeeded'
+        msg = (
+            'pose reset succeeded: '
+            f'x={target_x:+.3f}, y={target_y:+.3f}, yaw={target_yaw:+.3f}'
+        )
         self.get_logger().info(msg)
         return True, msg
 

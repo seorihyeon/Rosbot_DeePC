@@ -10,14 +10,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-RESULTS_DIR = Path('/ws/diffbot_results')
+RESULTS_DIR = Path('/ws/results')
 
 PRED_COMMON_REQUIRED = {
     'step', 'mode', 'sim_time_sec', 'ref_idx', 'pred_step',
     'u_v', 'u_w', 'y_x', 'y_y'
 }
 PRED_YAW_SCALAR_REQUIRED = {'y_yaw'}
-PRED_YAW_TRIG_REQUIRED = {'y_cos_yaw', 'y_sin_yaw'}
 
 RUN_REQUIRED = {
     'step', 'mode', 'sim_time_sec', 'ref_idx',
@@ -89,19 +88,6 @@ def infer_run_csv_path(pred_path: Path) -> Optional[Path]:
     return None
 
 
-def _unwrap_prediction_yaw_per_step(df: pd.DataFrame, yaw_wrapped: np.ndarray) -> np.ndarray:
-    out = np.zeros(len(df), dtype=np.float64)
-
-    tmp = df[['step', 'pred_step']].copy()
-    tmp['yaw_wrapped'] = yaw_wrapped
-    tmp = tmp.sort_values(['step', 'pred_step'])
-
-    for _, seg in tmp.groupby('step', sort=False):
-        out[seg.index.to_numpy()] = unwrap_angle_series(seg['yaw_wrapped'].to_numpy())
-
-    return out
-
-
 def load_prediction_df(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path)
 
@@ -115,18 +101,8 @@ def load_prediction_df(path: Path) -> pd.DataFrame:
     if PRED_YAW_SCALAR_REQUIRED.issubset(cols):
         df['yaw_pred'] = df['y_yaw'].astype(np.float64)
         df['yaw_repr'] = 'scalar_yaw'
-    elif PRED_YAW_TRIG_REQUIRED.issubset(cols):
-        yaw_wrapped = np.arctan2(
-            df['y_sin_yaw'].to_numpy(dtype=np.float64),
-            df['y_cos_yaw'].to_numpy(dtype=np.float64),
-        )
-        df['yaw_pred'] = _unwrap_prediction_yaw_per_step(df, yaw_wrapped)
-        df['yaw_repr'] = 'cos_sin_unwrapped'
     else:
-        raise ValueError(
-            "Prediction CSV must contain either ['y_yaw'] "
-            "or ['y_cos_yaw', 'y_sin_yaw']."
-        )
+        raise ValueError("Prediction CSV must contain ['y_yaw'].")
 
     return df
 
@@ -149,7 +125,7 @@ def _align_prediction_branch_per_step(err_df: pd.DataFrame) -> np.ndarray:
     at that horizon's first aligned sample.
 
     This keeps cumulative yaw error meaningful while remaining robust to
-    legacy cos/sin-based prediction logs.
+    scalar-yaw prediction logs.
     """
     out = np.zeros(len(err_df), dtype=np.float64)
 

@@ -3,7 +3,7 @@ import csv
 import math
 import os
 
-DT = 0.1          # deepc_params.yaml 의 sample_time 과 맞춤
+DT = 0.03          # deepc_params.yaml 의 sample_time 과 맞춤
 RADIUS = 1.0       # [m]
 SPEED = 0.30       # [m/s]
 CENTER_X = 0.0
@@ -11,7 +11,11 @@ CENTER_Y = RADIUS  # 시작점을 (0, 0), 시작 yaw를 0 rad로 맞추기 위�
 OUT_PATH = "/ws/ref/circle_reference.csv"
 
 def wrap_to_pi(angle: float) -> float:
-    return (angle + math.pi) % (2.0 * math.pi) - math.pi
+    raw = float(angle)
+    wrapped = (raw + math.pi) % (2.0 * math.pi) - math.pi
+    if math.isclose(wrapped, -math.pi, abs_tol=1.0e-12) and raw > 0.0:
+        return math.pi
+    return wrapped
 
 def main():
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
